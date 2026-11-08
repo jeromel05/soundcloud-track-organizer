@@ -15,47 +15,56 @@ It only reads public data: no login, and it never likes, unlikes, follows or pos
 
 ## Setup
 
-Tested on macOS with Apple Silicon; Linux should work too (models then run on the CPU).
+Tested on macOS with Apple Silicon; Linux should work too (models then run on the CPU, or CUDA if available).
+You need Python 3.12 and ffmpeg.
 
 ```sh
-git clone <this repo> && cd soundcloud-track-organizer
-conda create -p ./.env -c conda-forge python=3.12 ffmpeg   # or any Python 3.12 + ffmpeg on your PATH
-./.env/bin/pip install -r requirements.txt
-./.env/bin/python -m sctag.download_models                # Essentia models, ~28 MB
+git clone https://github.com/jeromel05/soundcloud-track-organizer.git
+cd soundcloud-track-organizer
+
+# either conda (brings its own ffmpeg)...
+conda create -p ./.env -c conda-forge python=3.12 ffmpeg && conda activate ./.env
+# ...or a plain virtualenv, with ffmpeg from your package manager (brew install ffmpeg)
+python3.12 -m venv .venv && source .venv/bin/activate
+
+pip install -e .
 ```
 
-CLAP and CLIP (~1.5 GB) are downloaded from Hugging Face the first time they're used.
+`sctag run` downloads the models it needs: Essentia's (~28 MB, into `models/`; or `sctag models`) and CLAP + CLIP
+from Hugging Face (~1.5 GB, cached in `~/.cache/huggingface`).
 
 ## Run
 
-Your likes must be public. Your username is the part after `soundcloud.com/` in your profile URL.
+Run `sctag` from the repo folder: your data goes to `data/` there (or set `SCTAG_HOME` to use another folder).
+Your likes must be public; your username is the part after `soundcloud.com/` in your profile URL.
 
 ```sh
-./run_all.sh <username>            # fetch likes, analyze everything, build the reports
-./.env/bin/python -m sctag.serve   # then open http://127.0.0.1:8765
+sctag run <username>      # fetch likes, analyze everything, build the reports
+sctag serve               # then open http://127.0.0.1:8765
 ```
 
 The first run takes a while: about 3.5 hours for 1,700 likes on an M-series Mac, mostly streaming audio.
-It's resumable, and rerunning it later only analyzes new likes. To run it overnight without the Mac sleeping
-(keep it plugged in with the lid open):
+It's resumable, and rerunning it later only analyzes new likes. To run it overnight on a Mac (plugged in,
+lid open), or to start it later with `--at 23:00`:
 
 ```sh
-nohup caffeinate -i -s ./run_all.sh <username> > /dev/null 2>&1 &
+nohup caffeinate -i -s sctag run <username> > data/run.log 2>&1 &
 tail -f data/run.log
 ```
 
 The reports (`data/report_tracks.html`, `data/report_sets.html`) also open directly as files, but live search
-and labelling need `sctag.serve`. It only listens on your own machine; pass a port if 8765 is taken
-(`python -m sctag.serve 8766`).
+and labelling need `sctag serve`. It only listens on your own machine; use `--port` if 8765 is taken.
 
-Individual steps, if you prefer:
+All commands (`sctag <command> --help` for details):
 
-```sh
-./.env/bin/python -m sctag.fetch_likes <username>     # -> data/likes.json
-./.env/bin/python -m sctag.analyze tracks --sample 50 # try a sample first; no --sample = everything
-./.env/bin/python -m sctag.analyze sets
-./.env/bin/python -m sctag.report                     # -> data/report_*.html
-```
+| command | what it does |
+| --- | --- |
+| `sctag run <username>` | everything below, in order |
+| `sctag fetch <username>` | download your list of likes to `data/likes.json` |
+| `sctag analyze tracks\|sets` | analyze the audio; `--sample 20` to try it on a few likes first |
+| `sctag report` | train the genre model and build the HTML reports |
+| `sctag serve` | open the reports with live search and labelling |
+| `sctag models` | download the Essentia models |
 
 ## How it works
 
@@ -75,7 +84,7 @@ set energy) and [CLIP](https://huggingface.co/openai/clip-vit-base-patch32) for 
    (a rapper's name on someone else's upload = "rap edit").
 3. **Genre model** (`sctag/classify.py`): learns 1 and 2 from the audio and guesses for the rest (shown with
    a "?"). A genre is learned once 8 tracks have it and its guesses are precise enough.
-   Press "Retrain" in the page (or run `sctag.report`) after labelling.
+   Press "Retrain" in the page (or run `sctag report`) after labelling.
 
 **Set energy** compares each window to "energetic" and "calm" text prompts; a set is energetic or calm when
 2/3 of its windows are, otherwise mixed.
@@ -86,22 +95,37 @@ The vocabulary is tuned to one person's library (lots of Brazilian funk and club
 
 - `sctag/text_tags.py`: `GENRE_PATTERNS` (genre → regexes) and `RAPPERS`.
 - `sctag/report.py`: `MOODS` (mood → CLAP prompt), and the example `VIBE_QUERIES` / `COVER_QUERIES`.
-- `sctag/analyze.py`: `ENERGY_HOT` / `ENERGY_COOL` (set energy cutoffs; only `sctag.report` needs rerunning).
+- `sctag/config.py`: set energy cutoffs and prompts, window lengths, the 15 min tracks / sets split.
+
+Changes to the vocabulary or the energy cutoffs only need `sctag report`; window settings need a new analysis.
 
 ## Project layout
 
 ```
-run_all.sh                 full pipeline: fetch → analyze tracks & sets → reports
-sctag/fetch_likes.py       likes from SoundCloud's public web API
-sctag/analyze.py           stream audio windows, run the models, save tags + embeddings
-sctag/text_tags.py         genres from titles and tags
-sctag/classify.py          genre model trained on text tags + your labels
-sctag/report.py            build the HTML reports
-sctag/report_template.html the report page
-sctag/serve.py             local server: live search, labelling, retrain
-sctag/download_models.py   fetch the Essentia models
-data/                      everything about your likes (not in git)
-models/                    Essentia models (not in git)
+sctag/
+  cli.py                the `sctag` command
+  config.py             paths and analysis settings
+  soundcloud.py         your likes, from SoundCloud's public web API
+  audio.py              streaming audio windows (yt-dlp + ffmpeg) and covers
+  models.py             Essentia, CLAP and CLIP wrappers, model download
+  analyze.py            per-like analysis: windows -> tags + embeddings
+  text_tags.py          genres from titles and tags
+  classify.py           the genre model (your labels + text tags -> audio)
+  search.py             text -> audio / cover search
+  report.py             builds the HTML reports
+  report_template.html  the report page
+  serve.py              local server: live search, labelling, retrain
+tests/                  pytest, no models or network needed
+data/                   everything about your likes (not in git)
+models/                 Essentia models (not in git)
+```
+
+## Development
+
+```sh
+pip install -e ".[dev]"
+pytest
+ruff check . && ruff format .
 ```
 
 ## Limits

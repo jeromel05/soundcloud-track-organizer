@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "soundcloud-track-organizer"
+version = "0.1.0"
+description = "Tag, browse and search your SoundCloud likes by genre, mood, BPM, energy and cover art, with audio models running locally"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    "essentia-tensorflow==2.1b6.dev1389",  # pre-release pin: a build known to work, Apple Silicon included
+    "numpy",
+    "pillow",
+    "scikit-learn",
+    "torch>=2.4",
+    "transformers>=4.45",
+    "yt-dlp",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+sctag = "sctag.cli:main"
+
+[tool.setuptools]
+packages = ["sctag"]
+
+[tool.setuptools.package-data]
+sctag = ["report_template.html"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4"]
+ignore = ["SIM108"]  # ternaries aren't always clearer
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

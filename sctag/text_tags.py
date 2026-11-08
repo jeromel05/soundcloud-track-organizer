@@ -4,6 +4,7 @@ Cheap (no audio), so it also covers DRM tracks, and much more reliable than audi
 Titles that name a rapper ("Chief Keef - Citgo (… Blend)") get "rap edit", or "rap" if the rapper uploaded it.
 Extend GENRE_PATTERNS / RAPPERS freely: matching is case- and accent-insensitive.
 """
+
 import re
 import unicodedata
 
@@ -43,7 +44,7 @@ GENRE_PATTERNS = {
     "house": [r"\bhouse\b"],
     "experimental / noise": [r"experimental", r"\bnoise\b"],
 }
-TAG_STUFFING = 4  # this many genres found only in the uploader's tags = keyword stuffing, ignore them
+TAG_STUFFING = 4  # this many genres in the uploader's tags = keyword stuffing: ignore the tags
 BRAZILIAN_FUNK = {"bruxaria", "mandelão", "rock doido", "funk ritmado", "funk automotivo", "tecnobrega", "favela bass"}
 
 # Distinctive names: matched anywhere in the title.
@@ -64,21 +65,47 @@ sheff g | kay flock | fivio foreign | central cee | digga d | skepta | stormzy |
 slowthai | jme | wiley | dizzee rascal | kano | ghetts | d double e | freeze corleone | pnl | booba | kaaris
 niska | ninho | gazo | tiakola | ateyaba | himra | princess nokia | azealia banks | kodak black | ynw melly
 mexikodro | lucki | autumn | slayr | nettspend | osamason | che | kankan | summrs | rylo rodriguez
-a boogie wit da hoodie | pnb rock | matue | veigh | teto | mc cabelinho | orochi | daboor | shabjdeed | wegz | marwan pablo | bad bunny
+a boogie wit da hoodie | pnb rock | matue | veigh | teto | mc cabelinho | orochi | daboor | shabjdeed | wegz
+marwan pablo | bad bunny
 """.replace("\n", "|")
 # Names that are also ordinary words: only matched as a whole artist credit (e.g. "Future - Honest (… mix)").
-AMBIGUOUS_RAPPERS = {"future", "drake", "ye", "dave", "nas", "jt", "takeoff", "offset", "common", "logic", "jul",
-                     "sch", "eve", "russ", "tyga", "unk"}
+AMBIGUOUS_RAPPERS = {
+    "future",
+    "drake",
+    "ye",
+    "dave",
+    "nas",
+    "jt",
+    "takeoff",
+    "offset",
+    "common",
+    "logic",
+    "jul",
+    "sch",
+    "eve",
+    "russ",
+    "tyga",
+    "unk",
+}
+
+
+_KANA = re.compile(r"[぀-ヿ]")
 
 
 def norm(s):
-    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode() if not re.search(r"[぀-ヿ]", s or "") else s
+    """Lowercase, accents stripped (Japanese kept as is), "$" -> "s", no apostrophes or dots, single spaces."""
+    s = s or ""
+    if not _KANA.search(s):
+        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
     s = s.lower().replace("$", "s").replace("'", "").replace(".", "")
     return re.sub(r"\s+", " ", s).strip()
 
 
-_RAPPER_RE = re.compile(r"\b(" + "|".join(sorted({re.escape(norm(n)) for n in RAPPERS.split("|") if n.strip()},
-                                                  key=len, reverse=True)) + r")\b")
+_RAPPER_RE = re.compile(
+    r"\b("
+    + "|".join(sorted({re.escape(norm(n)) for n in RAPPERS.split("|") if n.strip()}, key=len, reverse=True))
+    + r")\b"
+)
 _GENRE_RE = {tag: re.compile("|".join(pats)) for tag, pats in GENRE_PATTERNS.items()}
 
 
@@ -92,6 +119,7 @@ def artist_credits(title):
 
 
 def rappers_in(title):
+    """Rapper names found in a title."""
     t = norm(title)
     return set(_RAPPER_RE.findall(t)) | (artist_credits(title) & AMBIGUOUS_RAPPERS)
 
@@ -99,13 +127,16 @@ def rappers_in(title):
 def text_tags(track, kind="tracks"):
     """[(tag, source)] with source in title / genre / tags; first source wins per tag."""
     found = {}
-    for source, text in (("title", track.get("title")), ("genre", track.get("sc_genre")), ("tags", track.get("sc_tags"))):
-        t = norm(text)
-        for tag, rx in _GENRE_RE.items():
-            if tag not in found and rx.search(t):
-                found[tag] = source
-    if sum(s == "tags" for s in found.values()) >= TAG_STUFFING:  # "Dembow Reggaetón Hardstyle Techno ..." = SEO
-        found = {g: s for g, s in found.items() if s != "tags"}
+    for source, text in (
+        ("title", track.get("title")),
+        ("genre", track.get("sc_genre")),
+        ("tags", track.get("sc_tags")),
+    ):
+        in_text = [tag for tag, rx in _GENRE_RE.items() if rx.search(norm(text))]
+        if source == "tags" and len(in_text) >= TAG_STUFFING:  # "Dembow Reggaetón Hardstyle Techno ..." = SEO
+            continue
+        for tag in in_text:
+            found.setdefault(tag, source)
     if found.keys() & BRAZILIAN_FUNK:
         found.setdefault("baile funk", next(found[g] for g in found if g in BRAZILIAN_FUNK))
     if kind == "tracks" and (names := rappers_in(track.get("title"))):

@@ -132,7 +132,7 @@ a { color: var(--accent); }
 const D = /*DATA*/null;
 const T = D.tracks;
 const SETS = D.kind === "sets";
-const LIVE = location.protocol.startsWith("http");  // served by `python -m sctag.serve`: search + labelling
+const LIVE = location.protocol.startsWith("http");  // served by `sctag serve`: search + labelling
 const byId = new Map(T.map(t => [t.id, t]));
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -157,7 +157,7 @@ $("#h1").textContent = SETS ? "Sets, mixes & podcasts" : "Tracks";
 $("#other").textContent = SETS ? "→ Tracks" : "→ Sets & podcasts";
 $("#other").href = SETS ? "report_tracks.html" : "report_sets.html";
 $("#sub").textContent = `${T.length} ${SETS ? "sets" : "tracks"} · click a cover for details and playback` +
-  (LIVE ? "" : " · run python -m sctag.serve for live search and labelling");
+  (LIVE ? "" : " · run sctag serve for live search and labelling");
 
 function genreTags(t) {
   if (t.my_genres) return t.my_genres.map(g => `<span class="tag g mine" title="your label">${esc(g)}</span>`);
@@ -226,10 +226,10 @@ const strip6 = list => `<div class="strip">${list.map(card).join("")}</div>`;
 $("#vibe .examples").innerHTML = Object.entries(D.vibe).map(([q, hits]) =>
   `<section><h2>“${esc(q)}”</h2>${strip6(hits.map(([i]) => T[i]))}</section>`).join("");
 $("#cover .examples").innerHTML = Object.entries(D.covers).map(([q, hits]) =>
-  `<section><h2>“${esc(q)}”</h2>${strip6(hits.map(i => T[i]))}</section>`).join("");
+  `<section><h2>“${esc(q)}”</h2>${strip6(hits.map(([i]) => T[i]))}</section>`).join("");
 $("#vibe .note").textContent = LIVE ? "Text → audio search with CLAP." + (SETS ? " Sets match on their best passage." : "")
-  : "Text → audio search with CLAP. These example queries were run when the report was built; run python -m sctag.serve for a search box.";
-$("#cover .note").textContent = "Text → cover art search with CLIP." + (LIVE ? "" : " Run python -m sctag.serve for a search box.");
+  : "Text → audio search with CLAP. These example queries were run when the report was built; run sctag serve for a search box.";
+$("#cover .note").textContent = "Text → cover art search with CLIP." + (LIVE ? "" : " Run sctag serve for a search box.");
 for (const mode of ["vibe", "cover"]) {
   const box = $("#" + mode), form = box.querySelector("form");
   form.hidden = !LIVE;

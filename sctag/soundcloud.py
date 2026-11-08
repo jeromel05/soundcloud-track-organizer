@@ -1,20 +1,21 @@
 """Fetch all liked tracks of a public SoundCloud profile, with like dates.
 
-Uses SoundCloud's public web API (api-v2), the same one the website and yt-dlp use.
-Usage: python -m sctag.fetch_likes <username>   (the part after soundcloud.com/; likes must be public)
+Uses SoundCloud's public web API (api-v2), the same one the website and yt-dlp use. Read-only, no login.
 """
+
 import json
+import logging
 import re
-import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
+
+from .config import CLIENT_ID, DATA, LIKES
 
 API = "https://api-v2.soundcloud.com"
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
-DATA = Path(__file__).resolve().parent.parent / "data"
-CLIENT_ID_CACHE = DATA / "client_id.txt"
+log = logging.getLogger(__name__)
 
 
 def _get(url):
@@ -35,13 +36,13 @@ def scrape_client_id():
 
 class Client:
     def __init__(self):
-        self.client_id = CLIENT_ID_CACHE.read_text().strip() if CLIENT_ID_CACHE.exists() else None
+        self.client_id = CLIENT_ID.read_text().strip() if CLIENT_ID.exists() else None
 
     def get_json(self, endpoint, **params):
         for attempt in range(2):
             if not self.client_id:
                 self.client_id = scrape_client_id()
-                CLIENT_ID_CACHE.write_text(self.client_id)
+                CLIENT_ID.write_text(self.client_id)
             sep = "&" if "?" in endpoint else "?"
             full = f"{endpoint}{sep}{urllib.parse.urlencode({**params, 'client_id': self.client_id})}"
             try:
@@ -54,12 +55,13 @@ class Client:
 
 
 def slim_track(t):
+    user = t.get("user") or {}
     return {
         "id": t["id"],
         "title": t.get("title"),
-        "artist": (t.get("user") or {}).get("username"),
+        "artist": user.get("username"),
         "url": t.get("permalink_url"),
-        "artwork_url": t.get("artwork_url") or (t.get("user") or {}).get("avatar_url"),
+        "artwork_url": t.get("artwork_url") or user.get("avatar_url"),
         "sc_genre": t.get("genre") or "",
         "sc_tags": t.get("tag_list") or "",
         "duration_s": round((t.get("duration") or 0) / 1000),
@@ -72,24 +74,22 @@ def slim_track(t):
 
 
 def fetch_likes(username):
+    """All liked tracks (liked playlists are skipped), newest like first."""
     c = Client()
     user = c.get_json(f"{API}/resolve", url=f"https://soundcloud.com/{username}")
     url, params = f"{API}/users/{user['id']}/likes", {"limit": 200, "linked_partitioning": 1}
     out = []
     while url:
         page = c.get_json(url, **params)
-        for item in page["collection"]:
-            if item.get("track"):  # skip liked playlists
-                out.append({**slim_track(item["track"]), "liked_at": item["created_at"]})
+        out += [{**slim_track(i["track"]), "liked_at": i["created_at"]} for i in page["collection"] if i.get("track")]
         url, params = page.get("next_href"), {}
-        print(f"\r{len(out)} likes", end="", file=sys.stderr)
         time.sleep(0.3)
-    print(file=sys.stderr)
     return out
 
 
-if __name__ == "__main__":
+def save_likes(username):
     DATA.mkdir(exist_ok=True)
-    likes = fetch_likes(sys.argv[1])
-    (DATA / "likes.json").write_text(json.dumps(likes, indent=1, ensure_ascii=False))
-    print(f"wrote {len(likes)} tracks to {DATA / 'likes.json'}")
+    likes = fetch_likes(username)
+    LIKES.write_text(json.dumps(likes, indent=1, ensure_ascii=False))
+    log.info("wrote %d likes to %s", len(likes), LIKES)
+    return likes

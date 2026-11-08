@@ -1,23 +1,28 @@
-"""Build static HTML reports from data/analysis/ to eyeball the tags, one per kind.
+"""Build the HTML reports (data/report_tracks.html, data/report_sets.html) from data/analysis/.
 
-Tracks and sets are scored, compared and searched only against their own kind. Genres come from the title /
-tags (text_tags), your labels (data/labels.json) and the genre model trained on both (classify.py).
-Usage: python -m sctag.report          -> data/report_tracks.html, data/report_sets.html
-       python -m sctag.report sets     -> just one
-Open the files directly, or run `python -m sctag.serve` for live search and labelling.
+Tracks and sets are scored, compared and searched only against their own kind. Genres come from your labels,
+the title / tags (text_tags) and the genre model trained on both (classify). Moods are zero-shot CLAP prompts.
 """
+
 import json
+import logging
 import sys
 from collections import Counter
 from pathlib import Path
 
 import numpy as np
 
-from .analyze import DATA, ENERGY_COOL, ENERGY_HOT, ENERGY_MAJORITY, KINDS, OUT, energy_summary
-from .classify import MIN_POSITIVES, GenreModel, load_labels, unit
+from .analyze import energy_summary, load_likes
+from .classify import MIN_POSITIVES, GenreModel, load_labels
+from .config import ANALYSIS, ENERGY_COOL, ENERGY_HOT, ENERGY_MAJORITY, KINDS, report_path
+from .models import unit
+from .search import Index, best, load_arrays
 from .text_tags import GENRE_PATTERNS, text_tags
 
-# Your own vocabulary, scored zero-shot with CLAP text prompts.
+log = logging.getLogger(__name__)
+TEMPLATE = Path(__file__).parent / "report_template.html"
+
+# Your own mood vocabulary: mood -> CLAP prompt
 MOODS = {
     "light": "light, airy, gentle music",
     "dark": "dark, ominous, brooding music",
@@ -38,6 +43,8 @@ MOODS = {
     "icy": "cold, icy, metallic, futuristic music",
     "warm": "warm, soulful, organic music",
 }
+MOOD_MIN_Z = 0.5  # a mood is shown when a like is this many standard deviations above your average
+# Example searches baked into the report (the served report also has a search box)
 VIBE_QUERIES = [
     "dark angelic vocals over broken percussion",
     "fast distorted Brazilian funk",
@@ -56,109 +63,127 @@ COVER_QUERIES = [
     "a colorful collage",
     "a dark minimal abstract cover",
 ]
-
-
-def top(names, scores, k):
-    idx = np.argsort(-scores)[:k]
-    return [(names[i], round(float(scores[i]), 2)) for i in idx]
+SET_GENRE_MIN_SHARE = 0.2  # a set gets a genre guess when this share of its windows has it
 
 
 def load(kind):
     """Analyzed likes of this kind that are still liked, in like order, with fresh metadata from likes.json."""
-    src, recs, arr = OUT / kind, [], []
-    for t in json.load(open(DATA / "likes.json")):
+    src, recs, arrays = ANALYSIS / kind, [], []
+    for t in load_likes():
         if (f := src / f"{t['id']}.json").exists():
             recs.append({**json.loads(f.read_text()), **t})
-            arr.append(np.load(src / f"{t['id']}.npz"))
-    return recs, arr
+            arrays.append(load_arrays(src / f"{t['id']}.npz"))
+    return recs, arrays
 
 
-def build(enc, kind, recs, arr, gm, labels):
-    if not recs:
-        print(f"no {kind} analyzed yet")
-        return
-    clap = unit(np.stack([a["clap"] for a in arr]))
-    has_cover = [("cover_clip" in a) for a in arr]
-    cover = np.stack([a["cover_clip"] if "cover_clip" in a else np.zeros(512) for a in arr])
+class Moods:
+    """CLAP mood prompts, z-scored per mood over one kind: "dark" means darker than your usual track / set."""
 
-    mood_names = list(MOODS)
-    mood_text = enc.clap_text(list(MOODS.values()))
-    # moods: relative to this kind (z-score per tag), so "dark" means darker than your usual track / set
-    mood_mu, mood_sd = (clap @ mood_text.T).mean(0), (clap @ mood_text.T).std(0) + 1e-8
-    mood_z = (clap @ mood_text.T - mood_mu) / mood_sd
+    def __init__(self, enc, clap):
+        self.names = list(MOODS)
+        self.text = enc.clap_text(list(MOODS.values()))
+        sims = clap @ self.text.T
+        self.mu, self.sd = sims.mean(0), sims.std(0) + 1e-8
+
+    def z(self, emb):
+        return (unit(emb) @ self.text.T - self.mu) / self.sd
+
+    def top(self, z, k=3):
+        return [(self.names[i], round(float(z[i]), 2)) for i in np.argsort(-z)[:k] if z[i] > MOOD_MIN_Z]
+
+
+def tag_track(r, scores, gm, learned):
+    """Genre guesses for a track, and how useful labelling it would be."""
+    text = {g for g, _ in r["text_genres"]}
+    r["guess_genres"] = [
+        (gm.genres[k], round(float(scores[k]), 2))
+        for k in np.argsort(-scores)[:3]
+        if scores[k] >= 1 and gm.genres[k] not in text
+    ]
+    # ask first about untagged tracks closest to a genre cutoff (the most informative for the model)
+    unsure = np.abs(np.log(np.maximum(scores[learned], 1e-6))).min() if learned.any() else 0
+    r["label_priority"] = None if r["my_genres"] is not None or text else round(float(unsure), 3)
+
+
+def tag_set(r, clap_windows, gm, moods):
+    """Energy, per-window mood and genre (so you can see how the set moves), set-level genre guesses."""
+    r.update(energy_summary([step["energy"] for step in r["timeline"]]))  # with the current cutoffs
+    wz, wg = moods.z(clap_windows), gm.windows(clap_windows)
+    for k, step in enumerate(r["timeline"]):
+        step["mood"] = moods.names[int(np.argmax(wz[k]))]
+        step["guess"] = gm.genres[int(np.argmax(wg[k]))] if wg.shape[1] and wg[k].max() >= 1 else None
+    text, n = {g for g, _ in r["text_genres"]}, len(r["timeline"])
+    mix = Counter(step["guess"] for step in r["timeline"] if step["guess"])
+    r["guess_genres"] = [
+        (g, round(c / n, 2)) for g, c in mix.most_common(3) if c / n >= SET_GENRE_MIN_SHARE and g not in text
+    ]
+    # ask first about sets closest to an energy boundary
+    margin = min(abs(r["energetic_share"] - ENERGY_MAJORITY), abs(r["calm_share"] - ENERGY_MAJORITY))
+    r["label_priority"] = None if r["my_energy"] else round(margin, 3)
+
+
+def annotate(kind, recs, arrays, ix, enc, gm, labels):
+    """Add everything the page shows to each record."""
+    moods = Moods(enc, ix.clap)
+    mood_z = moods.z(ix.clap)
+    similar = ix.clap @ ix.clap.T
+    np.fill_diagonal(similar, -1)
     learned = np.isin(gm.genres, gm.learned())
     if kind == "tracks":
-        scores = gm.tracks(np.stack([a["clap"] for a in arr]), np.stack([a["effnet"] for a in arr]))
-
+        scores = gm.tracks(np.stack([a["clap"] for a in arrays]), np.stack([a["effnet"] for a in arrays]))
     for i, r in enumerate(recs):
         mine = labels.get(str(r["id"]), {})
-        r["my_genres"], r["my_energy"] = mine.get("genres"), mine.get("energy")  # None = not labelled by you
-        r["text_genres"] = text_tags(r, kind)  # confident tags from title / genre field / tags
-        r["clap_moods"] = [t for t in top(mood_names, mood_z[i], 3) if t[1] > 0.5]
-        sims = clap @ clap[i]
-        sims[i] = -1
-        r["similar"] = [int(j) for j in np.argsort(-sims)[:5]]
         r["idx"] = i
-        text = {g for g, _ in r["text_genres"]}
-        if kind == "sets":
-            r.update(energy_summary([step["energy"] for step in r["timeline"]]))
-            w = unit(arr[i]["clap_windows"])
-            wz, wg = (w @ mood_text.T - mood_mu) / mood_sd, gm.windows(arr[i]["clap_windows"])
-            for k, step in enumerate(r["timeline"]):  # tag each window too, so you can see how the set moves
-                step["mood"] = mood_names[int(np.argmax(wz[k]))]
-                step["guess"] = gm.genres[int(np.argmax(wg[k]))] if wg.shape[1] and wg[k].max() >= 1 else None
-            mix = Counter(step["guess"] for step in r["timeline"] if step["guess"])
-            r["guess_genres"] = [(g, round(c / len(r["timeline"]), 2)) for g, c in mix.most_common(3)
-                                 if c / len(r["timeline"]) >= 0.2 and g not in text]
-            # ask first about sets closest to an energy boundary
-            r["label_priority"] = None if r["my_energy"] else round(min(
-                abs(r["energetic_share"] - ENERGY_MAJORITY), abs(r["calm_share"] - ENERGY_MAJORITY)), 3)
+        r["my_genres"], r["my_energy"] = mine.get("genres"), mine.get("energy")  # None = not labelled by you
+        r["text_genres"] = text_tags(r, kind)
+        r["clap_moods"] = moods.top(mood_z[i])
+        r["similar"] = [int(j) for j in np.argsort(-similar[i])[:5]]
+        if kind == "tracks":
+            tag_track(r, scores[i], gm, learned)
         else:
-            s = scores[i]
-            r["guess_genres"] = [(gm.genres[k], round(float(s[k]), 2)) for k in np.argsort(-s)[:3]
-                                 if s[k] >= 1 and gm.genres[k] not in text]
-            # ask first about untagged tracks closest to a genre cutoff (most informative for the classifier)
-            unsure = np.abs(np.log(np.maximum(s[learned], 1e-6))).min() if learned.any() else 0
-            r["label_priority"] = None if r["my_genres"] is not None or text else round(float(unsure), 3)
+            tag_set(r, arrays[i]["clap_windows"], gm, moods)
 
-    def vibe_hits(qe):
-        # tracks: whole-track embedding; sets: best-matching window, so one fitting passage is enough
-        if kind == "sets":
-            sims = np.array([np.max(unit(a["clap_windows"]) @ qe) for a in arr])
-        else:
-            sims = clap @ qe
-        return [(int(j), round(float(sims[j]), 3)) for j in np.argsort(-sims)[:6]]
 
-    vibe = {q: vibe_hits(qe) for q, qe in zip(VIBE_QUERIES, enc.clap_text(VIBE_QUERIES))}
-    cs = cover @ enc.clip_text(COVER_QUERIES).T
-    cs[~np.array(has_cover)] = -1
-    covers = {q: [int(j) for j in np.argsort(-cs[:, k])[:6]] for k, q in enumerate(COVER_QUERIES)}
-
+def write(kind, recs, ix, enc, gm, labels):
+    vibe = {q: best(ix.audio_scores(e), 6) for q, e in zip(VIBE_QUERIES, enc.clap_text(VIBE_QUERIES), strict=True)}
+    covers = {q: best(ix.cover_scores(e), 6) for q, e in zip(COVER_QUERIES, enc.clip_text(COVER_QUERIES), strict=True)}
     vocab = list(GENRE_PATTERNS) + ["rap edit"]
     vocab += sorted({g for e in labels.values() for g in e.get("genres", ())} - set(vocab))  # your own tags
-    payload = {"kind": kind, "tracks": recs, "vibe": vibe, "covers": covers, "moods": mood_names, "genres": vocab,
-               "energy_cut": [ENERGY_HOT, ENERGY_COOL], "learned": gm.learned(),
-               "min_positives": MIN_POSITIVES}
-    html = (Path(__file__).parent / "report_template.html").read_text()
-    out = DATA / f"report_{kind}.html"
-    out.write_text(html.replace("/*DATA*/null", json.dumps(payload, ensure_ascii=False)))
+    payload = {
+        "kind": kind,
+        "tracks": recs,
+        "vibe": vibe,
+        "covers": covers,
+        "moods": list(MOODS),
+        "genres": vocab,
+        "energy_cut": [ENERGY_HOT, ENERGY_COOL],
+        "learned": gm.learned(),
+        "min_positives": MIN_POSITIVES,
+    }
+    out = report_path(kind)
+    out.write_text(TEMPLATE.read_text().replace("/*DATA*/null", json.dumps(payload, ensure_ascii=False)))
     guessed = sum(bool(r["guess_genres"]) and not r["text_genres"] for r in recs)
-    print(f"wrote {out}: {len(recs)} {kind}, {guessed} untagged ones got a genre guess")
+    log.info("wrote %s: %d %s, %d untagged ones got a genre guess", out, len(recs), kind, guessed)
 
 
-def main():
-    from .analyze import Encoders
+def build(kinds=KINDS, enc=None):
+    """Train the genre model on your tracks, then write the report of each kind."""
+    if enc is None:
+        from .models import Encoders
 
-    enc, labels = Encoders(), load_labels()
+        enc = Encoders()
+    labels = load_labels()
     data = {kind: load(kind) for kind in KINDS}
-    recs, arr = data["tracks"]  # the genre model learns from tracks, and also tags set windows
+    recs, arrays = data["tracks"]  # the genre model learns from tracks, and also tags set windows
     if not recs:
-        sys.exit("no tracks analyzed yet: run  python -m sctag.analyze tracks")
-    gm = GenreModel(recs, np.stack([a["clap"] for a in arr]), np.stack([a["effnet"] for a in arr]), labels)
-    print(f"genre model: learned {', '.join(gm.learned())}")
-    for kind in sys.argv[1:] or KINDS:
-        build(enc, kind, *data[kind], gm, labels)
-
-
-if __name__ == "__main__":
-    main()
+        sys.exit("no tracks analyzed yet: run  sctag analyze tracks")
+    gm = GenreModel(recs, np.stack([a["clap"] for a in arrays]), np.stack([a["effnet"] for a in arrays]), labels)
+    log.info("genre model learned: %s", ", ".join(gm.learned()) or "nothing yet (label more tracks)")
+    for kind in kinds:
+        recs, arrays = data[kind]
+        if not recs:
+            log.info("no %s analyzed yet", kind)
+            continue
+        ix = Index(kind, [r["id"] for r in recs], arrays)
+        annotate(kind, recs, arrays, ix, enc, gm, labels)
+        write(kind, recs, ix, enc, gm, labels)
