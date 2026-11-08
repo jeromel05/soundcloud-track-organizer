@@ -1,0 +1,8 @@
+# conda env
+.env/
+# your likes, analysis, reports, labels and the cached SoundCloud client id: personal, never commit
+data/
+# Essentia models: downloaded by `python -m sctag.download_models` (non-commercial license, not redistributed here)
+models/
+__pycache__/
+.DS_Store

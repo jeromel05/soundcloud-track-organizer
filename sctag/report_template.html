@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SoundCloud Likes</title>
+<style>
+:root {
+  --bg: #f6f5f2; --panel: #fff; --ink: #1b1b1a; --muted: #6d6a64; --line: #e3e0d9;
+  --accent: #ff5500; --chip: #efede8; --chip-on: #1b1b1a; --chip-on-ink: #fff;
+  --mood: #e8e4f7; --genre: #e2f0e6; --disc: #f5ead9; --mine: #2f8f4e;
+  --hot: #ff5500; --cool: #4a7fd6; --mid: #c9c5bc;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #121211; --panel: #1c1c1b; --ink: #eeece7; --muted: #9a968e; --line: #2e2d2b;
+    --chip: #2a2927; --chip-on: #eeece7; --chip-on-ink: #121211;
+    --mood: #2d2840; --genre: #22362a; --disc: #3a2f20; --mine: #5cc27d; --mid: #4a4844; --cool: #6d9be6; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
+header { padding: 24px 16px 8px; max-width: 1400px; margin: auto; }
+h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -.01em; }
+.sub { color: var(--muted); }
+nav { display: flex; gap: 6px; margin: 16px 0 8px; flex-wrap: wrap; align-items: center; }
+nav button, .chip, .btn { border: 0; background: var(--chip); color: var(--ink); padding: 6px 12px;
+  border-radius: 999px; font: inherit; cursor: pointer; }
+nav button.on, .chip.on { background: var(--chip-on); color: var(--chip-on-ink); }
+.chip.sug:not(.on) { box-shadow: inset 0 0 0 1.5px var(--mine); }
+.chip i { font-style: normal; opacity: .55; font-size: 11px; margin-left: 3px; }
+.btn.primary { background: var(--accent); color: #fff; }
+main { max-width: 1400px; margin: auto; padding: 0 16px 140px; }
+.filters { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.row .lbl { color: var(--muted); width: 84px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+.chip { padding: 3px 10px; font-size: 13px; }
+input[type=search], input[type=text], select { font: inherit; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+input[type=search] { width: min(420px, 100%); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  cursor: pointer; transition: transform .12s; }
+.card:hover { transform: translateY(-2px); }
+.card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--chip); }
+.card .b { padding: 8px 10px 10px; }
+.t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.tag { font-size: 11px; padding: 1px 7px; border-radius: 4px; background: var(--chip); }
+.tag.m { background: var(--mood); } .tag.g { background: var(--genre); } .tag.d { background: var(--disc); }
+.tag.g.txt { font-weight: 600; } .tag.g.guess { background: none; box-shadow: inset 0 0 0 1px var(--genre); }
+.tag.g.mine { font-weight: 600; box-shadow: inset 0 0 0 1px var(--mine); }
+.bpm { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); }
+section h2 { font-size: 15px; margin: 22px 0 8px; }
+.strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 760px) { .strip { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+#drawer { position: fixed; inset: 0 0 0 auto; width: min(460px, 100vw); background: var(--panel);
+  border-left: 1px solid var(--line); overflow-y: auto; padding: 18px 18px 140px; transform: translateX(100%);
+  transition: transform .2s; z-index: 5; }
+#drawer.open { transform: none; }
+#drawer img.big { width: 100%; border-radius: 8px; }
+#drawer .close { float: right; background: none; border: 0; font-size: 22px; color: var(--ink); cursor: pointer; }
+.labelbox { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 12px 0; }
+.labelbox h3 { margin: 0 0 8px; font-size: 14px; }
+.labelbox .row { margin-bottom: 6px; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+td { padding: 2px 0; border-bottom: 1px solid var(--line); }
+td:last-child { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.bar { height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; width: 90px; display: inline-block; vertical-align: middle; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+#player { position: fixed; left: 0; right: 0; bottom: 0; height: 120px; border: 0; z-index: 6; display: none; }
+.note { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; color: var(--muted); max-width: 900px; }
+input[type=range] { width: 160px; }
+.kindlink { margin-left: auto; font-size: 13px; }
+.energy { display: flex; gap: 1px; height: 8px; margin-top: 6px; }
+.energy i { flex: 1; border-radius: 1px; }
+.e-hot { background: var(--hot); } .e-cool { background: var(--cool); } .e-mid { background: var(--mid); }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+.timeline td:first-child { width: 52px; }
+.timeline td { text-align: left !important; color: var(--ink) !important; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="h1">SoundCloud likes</h1>
+  <div class="sub" id="sub"></div>
+  <nav>
+    <button data-v="lib" class="on">Library</button>
+    <button data-v="vibe">Vibe search</button>
+    <button data-v="cover">Cover search</button>
+    <button data-v="todo" hidden>To label</button>
+    <button id="retrain" class="btn primary" hidden></button>
+    <a id="other" class="kindlink"></a>
+  </nav>
+</header>
+<main>
+  <div id="lib">
+    <div class="filters">
+      <div class="row"><input type="search" id="q" placeholder="Search title, artist, tags…">
+        <select id="sort"></select></div>
+      <div class="row"><span class="lbl">Mood</span><span id="fm" class="row"></span></div>
+      <div class="row"><span class="lbl">Genre</span><span id="fg" class="row"></span></div>
+      <div class="row" id="erow" hidden><span class="lbl">Energy</span><span id="fe" class="row"></span></div>
+      <div class="row"><span class="lbl">BPM</span>
+        <input type="range" id="bmin" min="40" max="200" value="40"><input type="range" id="bmax" min="40" max="200" value="200">
+        <span class="bpm" id="bl"></span></div>
+    </div>
+    <p class="sub" id="count"></p>
+    <div class="grid" id="grid"></div>
+  </div>
+  <div id="vibe" hidden>
+    <form class="row live" hidden><input type="search" name="q" placeholder="Describe a sound, e.g. “glitchy angelic vocals over a heavy kick”"><button class="btn">Search</button></form>
+    <p class="note"></p>
+    <div class="grid results"></div>
+    <div class="examples"></div>
+  </div>
+  <div id="cover" hidden>
+    <form class="row live" hidden><input type="search" name="q" placeholder="Describe a cover, e.g. “a pink blurry photo of a car”"><button class="btn">Search</button></form>
+    <p class="note"></p>
+    <div class="grid results"></div>
+    <div class="examples"></div>
+  </div>
+  <div id="todo" hidden>
+    <p class="note" id="todonote"></p>
+    <div class="grid" id="todogrid"></div>
+  </div>
+</main>
+<aside id="drawer"></aside>
+<iframe id="player" allow="autoplay"></iframe>
+<script>
+const D = /*DATA*/null;
+const T = D.tracks;
+const SETS = D.kind === "sets";
+const LIVE = location.protocol.startsWith("http");  // served by `python -m sctag.serve`: search + labelling
+const byId = new Map(T.map(t => [t.id, t]));
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const art = t => (t.artwork_url || "").replace("-large.", "-t300x300.");
+const short = g => g.split("---").pop();
+const clock = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${x}` : `${m}:${x}`; };
+const length = t => t.duration_s >= 3600 ? `${Math.floor(t.duration_s / 3600)}h${String(Math.round(t.duration_s / 60) % 60).padStart(2, "0")}` : `${Math.round(t.duration_s / 60)} min`;
+
+// your labels win over the text tags and the genre model's guesses
+const genresOf = t => t.my_genres ?? [...t.text_genres, ...t.guess_genres].map(x => x[0]);
+const energyOf = t => t.my_energy || t.energy;
+const labelled = t => SETS ? !!t.my_energy : t.my_genres != null;
+const energyText = t => t.my_energy ? `<b>${t.my_energy}</b> (yours)` : `<b>${t.energy}</b>${t.energy_arc ? ` (${t.energy_arc})` : ""}`;
+const bpmText = t => SETS ? `${energyText(t)} · ${t.bpm_range[0]}–${t.bpm_range[1]} bpm` : `~${Math.round(t.bpm)} bpm`;
+const [HOT, COOL] = D.energy_cut;
+const ecls = e => e > HOT ? "e-hot" : e < COOL ? "e-cool" : "e-mid";
+const strip = t => SETS ? `<div class="energy" title="energy over the set: orange = energetic, blue = calm">${
+  t.timeline.map(w => `<i class="${ecls(w.energy)}"></i>`).join("")}</div>` : "";
+document.title = SETS ? "Sets · SoundCloud likes" : "Tracks · SoundCloud likes";
+$("#h1").textContent = SETS ? "Sets, mixes & podcasts" : "Tracks";
+$("#other").textContent = SETS ? "→ Tracks" : "→ Sets & podcasts";
+$("#other").href = SETS ? "report_tracks.html" : "report_sets.html";
+$("#sub").textContent = `${T.length} ${SETS ? "sets" : "tracks"} · click a cover for details and playback` +
+  (LIVE ? "" : " · run python -m sctag.serve for live search and labelling");
+
+function genreTags(t) {
+  if (t.my_genres) return t.my_genres.map(g => `<span class="tag g mine" title="your label">${esc(g)}</span>`);
+  return [...t.text_genres.map(([g, src]) => `<span class="tag g txt" title="from ${src}">${esc(g)}</span>`),
+    ...t.guess_genres.map(([g]) => `<span class="tag g guess" title="guessed from audio by your genre model">${esc(g)}?</span>`)];
+}
+function card(t) {
+  const discogs = SETS ? t.genre_mix.slice(0, 1).map(([g]) => g) : [t.discogs_genres[0][0]];
+  const tags = [
+    ...t.clap_moods.map(([m]) => `<span class="tag m">${esc(m)}</span>`),
+    ...genreTags(t),
+    ...discogs.map(g => `<span class="tag d" title="Discogs style (Essentia)">${esc(short(g))}</span>`),
+  ].join("");
+  return `<div class="card" data-i="${t.idx}"><img loading="lazy" src="${esc(art(t))}" alt="">
+    <div class="b"><div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}</div>
+    <div class="bpm">${SETS ? length(t) + " · " : ""}${bpmText(t)} · liked ${t.liked_at.slice(0, 10)}</div>
+    ${strip(t)}<div class="tags">${tags}</div></div></div>`;
+}
+
+// ---- library: search, sort, filters
+const SORTS = {
+  "liked, newest": () => 0,
+  "liked, oldest": (a, b) => a.liked_at.localeCompare(b.liked_at),
+  "BPM, slow → fast": (a, b) => a.bpm - b.bpm,
+  "BPM, fast → slow": (a, b) => b.bpm - a.bpm,
+  ...(SETS ? { "calmest first": (a, b) => a.energy_score - b.energy_score,
+    "most energetic first": (a, b) => b.energy_score - a.energy_score,
+    "shortest first": (a, b) => a.duration_s - b.duration_s } : {}),
+};
+$("#sort").innerHTML = Object.keys(SORTS).map(k => `<option>${k}</option>`).join("");
+const sel = { m: new Set(), g: new Set(), e: new Set() };
+const counted = (names, f, key) => { const c = {}; T.forEach(t => f(t).forEach(n => c[n] = (c[n] || 0) + 1));
+  return names.filter(n => c[n] || sel[key].has(n)).map(n => [n, c[n] || 0]); };
+function chips(el, entries, key) {
+  el.innerHTML = entries.map(([n, c]) => `<button class="chip${sel[key].has(n) ? " on" : ""}" data-n="${esc(n)}">${esc(n)}<i>${c}</i></button>`).join("");
+}
+function renderChips() {
+  chips($("#fm"), counted(D.moods, t => t.clap_moods.map(x => x[0]), "m"), "m");
+  chips($("#fg"), counted(D.genres, genresOf, "g").sort((a, b) => b[1] - a[1]), "g");
+  if (SETS) chips($("#fe"), counted(["energetic", "mixed", "calm"], t => [energyOf(t)], "e"), "e");
+}
+for (const [id, key] of [["#fm", "m"], ["#fg", "g"], ["#fe", "e"]]) $(id).onclick = e => {
+  const n = e.target.closest(".chip")?.dataset.n; if (n == null) return;
+  sel[key].has(n) ? sel[key].delete(n) : sel[key].add(n);
+  renderChips(); render();
+};
+$("#erow").hidden = !SETS;
+const norm = s => (s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
+T.forEach(t => t._text = norm([t.title, t.artist, t.sc_genre, t.sc_tags].join(" ")));
+function render() {
+  const lo = +$("#bmin").value, hi = +$("#bmax").value, words = norm($("#q").value).split(/\s+/).filter(Boolean);
+  $("#bl").textContent = `${lo}–${hi}`;
+  const ok = t => words.every(w => t._text.includes(w))
+    && [...sel.m].every(m => t.clap_moods.some(x => x[0] === m))
+    && (sel.g.size === 0 || genresOf(t).some(g => sel.g.has(g)))
+    && (!SETS || sel.e.size === 0 || sel.e.has(energyOf(t)))
+    && (SETS ? t.bpm_range[1] >= lo && t.bpm_range[0] <= hi : t.bpm >= lo && t.bpm <= hi);
+  const list = T.filter(ok).sort(SORTS[$("#sort").value]);
+  $("#count").textContent = list.length === T.length ? "" : `${list.length} match`;
+  $("#grid").innerHTML = list.map(card).join("") || '<p class="sub">Nothing matches.</p>';
+}
+$("#bmin").oninput = $("#bmax").oninput = $("#q").oninput = $("#sort").onchange = render;
+
+// ---- vibe / cover search: examples baked in at build time, plus a live box when served
+const strip6 = list => `<div class="strip">${list.map(card).join("")}</div>`;
+$("#vibe .examples").innerHTML = Object.entries(D.vibe).map(([q, hits]) =>
+  `<section><h2>“${esc(q)}”</h2>${strip6(hits.map(([i]) => T[i]))}</section>`).join("");
+$("#cover .examples").innerHTML = Object.entries(D.covers).map(([q, hits]) =>
+  `<section><h2>“${esc(q)}”</h2>${strip6(hits.map(i => T[i]))}</section>`).join("");
+$("#vibe .note").textContent = LIVE ? "Text → audio search with CLAP." + (SETS ? " Sets match on their best passage." : "")
+  : "Text → audio search with CLAP. These example queries were run when the report was built; run python -m sctag.serve for a search box.";
+$("#cover .note").textContent = "Text → cover art search with CLIP." + (LIVE ? "" : " Run python -m sctag.serve for a search box.");
+for (const mode of ["vibe", "cover"]) {
+  const box = $("#" + mode), form = box.querySelector("form");
+  form.hidden = !LIVE;
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const q = form.q.value.trim(); if (!q) return;
+    const out = box.querySelector(".results");
+    out.innerHTML = '<p class="sub">Searching… (the first search loads the models, ~20 s)</p>';
+    const hits = await (await fetch(`/api/search?kind=${D.kind}&mode=${mode}&q=${encodeURIComponent(q)}`)).json();
+    out.innerHTML = hits.map(([id]) => byId.get(id)).filter(Boolean).map(card).join("");
+    box.querySelector(".examples").hidden = true;
+  };
+}
+
+// ---- labelling (served only): your labels go to data/labels.json and train the genre model on "Retrain"
+const queue = () => T.filter(t => t.label_priority != null && !labelled(t)).sort((a, b) => a.label_priority - b.label_priority);
+$("#todonote").innerHTML = SETS
+  ? "Sets whose energy is the least clear-cut. Open one, skim the timeline, and click the energy that fits (✓ if the guess is right). Your answers override the guess and show where to move the energy cutoffs."
+  : `Untagged tracks your genre model is least sure about. Open one, listen, click the genres that fit (✓ if the guess is right, or type your own tag), then <b>Next</b>. Press <b>Retrain</b> after a batch: genres need ${D.min_positives} labelled tracks to be learned. Learned so far: ${D.learned.map(esc).join(", ")}.`;
+function renderTodo() { $("#todogrid").innerHTML = queue().slice(0, 60).map(card).join("") || '<p class="sub">Nothing left to label.</p>'; }
+async function save(t, body) {
+  const labels = await (await fetch("/api/labels", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: t.id, ...body }) })).json();
+  applyLabels(labels);
+  open(t.idx, false); renderChips(); render(); renderTodo();
+}
+function applyLabels(labels) {
+  T.forEach(t => { const l = labels[t.id] || {}; t.my_genres = l.genres ?? null; t.my_energy = l.energy ?? null; });
+  T.forEach(t => (t.my_genres || []).forEach(g => D.genres.includes(g) || D.genres.push(g)));
+  $("#retrain").textContent = `Retrain with your ${Object.keys(labels).length} labels`;
+}
+function labelBox(t) {
+  const current = t.my_genres ?? t.text_genres.map(x => x[0]), guessed = t.guess_genres.map(x => x[0]);
+  return `<div class="labelbox"><h3>Your labels ${labelled(t) ? "· saved" : ""}</h3>
+    ${SETS ? `<div class="row" data-act="energy">${["energetic", "mixed", "calm"].map(e =>
+      `<button class="chip${t.my_energy === e ? " on" : ""}${!t.my_energy && t.energy === e ? " sug" : ""}" data-n="${e}">${e}</button>`).join("")}</div>` : ""}
+    <div class="row" data-act="genre">${D.genres.map(g =>
+      `<button class="chip${current.includes(g) ? " on" : ""}${guessed.includes(g) ? " sug" : ""}" data-n="${esc(g)}">${esc(g)}</button>`).join("")}</div>
+    <div class="row"><input type="text" id="newtag" placeholder="your own tag ↵" size="14">
+      <button class="btn" data-act="ok" title="${SETS ? "keep the energy guess" : "keep the title tags and the guesses (green outline)"}">✓ Looks right</button>
+      <button class="btn" data-act="clear">Clear</button>
+      <button class="btn primary" data-act="next">Next →</button></div></div>`;
+}
+$("#drawer").addEventListener("click", e => {
+  const t = T[+$("#drawer").dataset.i], b = e.target.closest("[data-n], [data-act]"); if (!b || !t) return;
+  const act = b.dataset.act || b.parentElement.dataset.act, n = b.dataset.n;
+  if (act === "genre") {
+    const cur = new Set(t.my_genres ?? t.text_genres.map(x => x[0]));
+    cur.has(n) ? cur.delete(n) : cur.add(n);
+    save(t, { genres: [...cur] });
+  } else if (act === "energy") save(t, { energy: t.my_energy === n ? null : n });
+  else if (act === "ok") save(t, SETS ? { energy: energyOf(t) } : { genres: genresOf(t) });
+  else if (act === "clear") save(t, { genres: null, energy: null });
+  else if (act === "next") { const nx = queue().find(x => x !== t); if (nx) open(nx.idx); }
+});
+$("#drawer").addEventListener("keydown", e => {
+  if (e.target.id !== "newtag" || e.key !== "Enter") return;
+  const t = T[+$("#drawer").dataset.i], g = e.target.value.trim().toLowerCase(); if (!g) return;
+  save(t, { genres: [...new Set([...(t.my_genres ?? t.text_genres.map(x => x[0])), g])] });
+});
+$("#retrain").onclick = async () => {
+  const b = $("#retrain"); b.disabled = true; b.textContent = "Retraining… (~1 min)";
+  const r = await (await fetch("/api/rebuild", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
+  if (r.ok) location.reload(); else { b.disabled = false; b.textContent = "Retrain failed (see console)"; console.log(r.log); }
+};
+
+// ---- details drawer
+const bar = p => `<span class="bar"><i style="width:${Math.round(p * 100)}%"></i></span>`;
+function open(i, play = true) {
+  const t = T[i], d = $("#drawer");
+  const rows = (list, f = x => x) => list.map(([n, p]) => `<tr><td>${esc(f(n))}</td><td>${p.toFixed(2)}</td></tr>`).join("");
+  const bin = ["danceable", "aggressive", "party", "happy", "sad", "relaxed", "bright", "instrumental", "tonal"];
+  const keepScroll = d.dataset.i == i ? d.scrollTop : 0;
+  d.dataset.i = i;
+  d.innerHTML = `<button class="close" onclick="$('#drawer').classList.remove('open')">×</button>
+    <img class="big" src="${esc((t.artwork_url || "").replace("-large.", "-t500x500."))}" alt="">
+    <h2 style="margin:10px 0 0">${esc(t.title)}</h2>
+    <div class="a">${esc(t.artist)} · <a href="${esc(t.url)}" target="_blank">open on SoundCloud</a></div>
+    <p class="bpm">${length(t)} ·
+      ${SETS ? `${energyText(t)}: ${Math.round(t.energetic_share * 100)}% energetic, ${Math.round(t.calm_share * 100)}% calm ·
+        BPM ${t.bpm_range[0]}–${t.bpm_range[1]} (median ${Math.round(t.bpm)})` : `BPM ${t.bpm} (windows: ${t.bpm_windows.join(", ")})`} ·
+      SoundCloud genre: <b>${esc(t.sc_genre || "—")}</b></p>
+    ${LIVE ? labelBox(t) : `<div class="tags">${genreTags(t).join("")}</div>`}
+    ${t.text_genres.length ? `<h3>From title &amp; tags</h3><table>${t.text_genres.map(([g, src]) =>
+      `<tr><td>${esc(g)}</td><td>${esc(src)}</td></tr>`).join("")}</table>` : ""}
+    <h3>Guessed from audio</h3>
+    <table>${rows(t.clap_moods)}${t.guess_genres.map(([g, p]) =>
+      `<tr><td>${esc(g)}?</td><td>${SETS ? `${Math.round(p * 100)}% of windows` : `${p.toFixed(1)}× cutoff`}</td></tr>`).join("")}</table>
+    ${SETS ? `${strip(t)}<h3>Timeline (one 30 s window every ~4 min)</h3>
+    <table class="timeline">${t.timeline.map(w => `<tr><td><a href="${esc(t.url)}#t=${clock(w.t)}" target="_blank">${clock(w.t)}</a></td>
+      <td><span class="dot ${ecls(w.energy)}"></span>${Math.round(w.bpm)}</td><td>${esc(w.guess || "")}</td><td>${esc(short(w.genre))}</td><td>${esc(w.mood)}</td></tr>`).join("")}</table>
+    <h3>Discogs style mix (share of windows)</h3><table>${rows(t.genre_mix, x => x.replace("---", " › "))}</table>` : ""}
+    <h3>Discogs styles (Essentia${SETS ? ", whole-set average" : ""})</h3><table>${rows(t.discogs_genres, x => x.replace("---", " › "))}</table>
+    <h3>Mood/theme (Essentia, Jamendo)</h3><table>${rows(t.moodtheme)}</table>
+    <h3>Mood classifiers (Essentia)</h3>
+    <table>${bin.map(k => `<tr><td>${k}</td><td>${bar(t[k])} ${t[k].toFixed(2)}</td></tr>`).join("")}</table>
+    <h3>More like this (CLAP)</h3><div class="strip" style="grid-template-columns:repeat(3,1fr)">${t.similar.slice(0, 3).map(j => card(T[j])).join("")}</div>`;
+  d.classList.add("open");
+  d.scrollTop = keepScroll;
+  if (!play) return;
+  const p = $("#player");
+  p.src = `https://w.soundcloud.com/player/?url=${encodeURIComponent(t.url)}&auto_play=true&visual=false&show_comments=false`;
+  p.style.display = "block";
+}
+document.addEventListener("click", e => {
+  const c = e.target.closest(".card"); if (c) open(+c.dataset.i);
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("#drawer").classList.remove("open"); });
+document.querySelector("nav").onclick = e => {
+  const v = e.target.dataset.v; if (!v) return;
+  document.querySelectorAll("nav button[data-v]").forEach(b => b.classList.toggle("on", b === e.target));
+  ["lib", "vibe", "cover", "todo"].forEach(id => $("#" + id).hidden = id !== v);
+  if (v === "todo") renderTodo();
+};
+
+(async () => {
+  if (LIVE) {
+    document.querySelector('nav [data-v="todo"]').hidden = $("#retrain").hidden = false;
+    applyLabels(await (await fetch("/api/labels")).json());
+  }
+  renderChips(); render();
+})();
+</script>
+</body>
+</html>

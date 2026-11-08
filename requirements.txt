@@ -1,0 +1,8 @@
+# Python 3.12. ffmpeg must be installed too (conda: `conda install -c conda-forge ffmpeg`, or `brew install ffmpeg`).
+essentia-tensorflow==2.1b6.dev1389
+torch>=2.4
+transformers>=4.45
+yt-dlp
+numpy
+scikit-learn
+pillow
