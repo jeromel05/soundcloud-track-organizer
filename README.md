@@ -9,6 +9,8 @@ that run on your own computer. Made for curating DJ sets out of a big pile of li
 - **Sets & podcasts** are handled separately: each one is labelled energetic / mixed / calm with a timeline, so
   you can pick one for the right moment of the day.
 - **Your own genres**: label a few tracks in the page and a small model learns your vocabulary and tags the rest.
+- **Your posts and reposts** are fetched too; the Source filter picks likes, posts and/or reposts.
+- **Refresh likes** in the served page fetches new likes, analyzes them and rebuilds, without the terminal.
 
 Audio is streamed in short 30 s windows and never written to disk; only tags and embeddings are kept.
 It only reads public data: no login, and it never likes, unlikes, follows or posts anything.
@@ -54,13 +56,24 @@ tail -f data/run.log
 
 The reports (`data/report_tracks.html`, `data/report_sets.html`) also open directly as files, but live search
 and labelling need `sctag serve`. It only listens on your own machine; use `--port` if 8765 is taken.
+Its "Refresh likes" button does what `sctag run` does, in the background, for the username in your settings.
+
+Your settings live in `data/settings.json`, which you can edit by hand:
+
+```json
+{"username": "your-name", "liked_since": "2016-10-27"}
+```
+
+`sctag run` / `fetch` save the username (the page asks for it on the first Refresh if there's none).
+`liked_since` is optional: likes and reposts older than it are left out of every fetch and refresh, while your
+own posts are always kept. Set it by hand or with `--since YYYY-MM-DD`.
 
 All commands (`sctag <command> --help` for details):
 
 | command | what it does |
 | --- | --- |
 | `sctag run <username>` | everything below, in order |
-| `sctag fetch <username>` | download your list of likes to `data/likes.json` |
+| `sctag fetch <username>` | download your likes, posts and reposts to `data/likes.json` |
 | `sctag analyze tracks\|sets` | analyze the audio; `--sample 20` to try it on a few likes first |
 | `sctag report` | train the genre model and build the HTML reports |
 | `sctag serve` | open the reports with live search and labelling |
@@ -105,7 +118,7 @@ Changes to the vocabulary or the energy cutoffs only need `sctag report`; window
 sctag/
   cli.py                the `sctag` command
   config.py             paths and analysis settings
-  soundcloud.py         your likes, from SoundCloud's public web API
+  soundcloud.py         your likes, posts and reposts, from SoundCloud's public web API
   audio.py              streaming audio windows (yt-dlp + ffmpeg) and covers
   models.py             Essentia, CLAP and CLIP wrappers, model download
   analyze.py            per-like analysis: windows -> tags + embeddings
@@ -114,7 +127,7 @@ sctag/
   search.py             text -> audio / cover search
   report.py             builds the HTML reports
   report_template.html  the report page
-  serve.py              local server: live search, labelling, retrain
+  serve.py              local server: live search, labelling, retrain, refresh
 tests/                  pytest, no models or network needed
 data/                   everything about your likes (not in git)
 models/                 Essentia models (not in git)
