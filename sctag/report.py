@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .analyze import energy_summary, load_likes
+from .analyze import energy_summary, load_likes, waiting
 from .classify import MIN_POSITIVES, GenreModel, load_labels
 from .config import ANALYSIS, ENERGY_COOL, ENERGY_HOT, ENERGY_MAJORITY, KINDS, report_path
 from .models import unit
@@ -159,6 +159,7 @@ def write(kind, recs, ix, enc, gm, labels):
         "energy_cut": [ENERGY_HOT, ENERGY_COOL],
         "learned": gm.learned(),
         "min_positives": MIN_POSITIVES,
+        "pending": waiting(kind),  # liked but not analyzed yet: shown and playable, without tags
     }
     out = report_path(kind)
     out.write_text(TEMPLATE.read_text().replace("/*DATA*/null", json.dumps(payload, ensure_ascii=False)))

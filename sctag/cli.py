@@ -30,7 +30,7 @@ def cmd_run(args):
         wait_until(args.at)
     download()
     try:
-        save_likes(args.username)
+        save_likes(args.username, args.since)
     except Exception as e:
         if not LIKES.exists():
             raise
@@ -43,7 +43,7 @@ def cmd_run(args):
 def cmd_fetch(args):
     from .soundcloud import save_likes
 
-    save_likes(args.username)
+    save_likes(args.username, args.since)
 
 
 def cmd_analyze(args):
@@ -70,6 +70,14 @@ def cmd_models(args):
     download()
 
 
+def since(value):
+    datetime.date.fromisoformat(value)  # raises on anything but YYYY-MM-DD
+    return value
+
+
+SINCE_HELP = "skip likes and reposts older than this date (YYYY-MM-DD); saved to data/settings.json"
+
+
 def parser():
     p = argparse.ArgumentParser(prog="sctag", description="Tag, browse and search your SoundCloud likes.")
     sub = p.add_subparsers(dest="command", required=True, metavar="command")
@@ -78,10 +86,12 @@ def parser():
     c.add_argument("username", help="your SoundCloud username (the part after soundcloud.com/)")
     c.add_argument("--at", metavar="HH:MM", help="start at this time today, e.g. 23:00 for an overnight run")
     c.add_argument("--workers", type=int, default=6, help="parallel audio downloads (default: 6)")
+    c.add_argument("--since", type=since, metavar="YYYY-MM-DD", help=SINCE_HELP)
     c.set_defaults(func=cmd_run)
 
     c = sub.add_parser("fetch", help="download your list of likes to data/likes.json")
     c.add_argument("username", help="your SoundCloud username (the part after soundcloud.com/)")
+    c.add_argument("--since", type=since, metavar="YYYY-MM-DD", help=SINCE_HELP)
     c.set_defaults(func=cmd_fetch)
 
     c = sub.add_parser("analyze", help="analyze the audio of one kind of likes (resumable)")
