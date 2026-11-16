@@ -14,10 +14,17 @@ LIKES = DATA / "likes.json"
 LABELS = DATA / "labels.json"  # your own labels, set in the served report
 KIND_OVERRIDES = DATA / "kind_overrides.json"  # {"<track id>": "sets"} moves a like to the other kind
 CLIENT_ID = DATA / "client_id.txt"  # cached public SoundCloud web client id
+PLAYLISTS = DATA / "playlists.json"  # which SoundCloud playlists `sctag playlists` makes: you pick them
+PLAYLISTS_SCRIPT = DATA / "playlists_browser.js"  # makes them: paste it in the console of soundcloud.com
 
 
 def report_path(kind):
     return DATA / f"report_{kind}.html"
+
+
+def library_path(kind):
+    """The final tags of each like, written with the report (read by `sctag playlists`)."""
+    return DATA / f"library_{kind}.json"
 
 
 # Likes are split by duration into two kinds, analyzed and searched separately

@@ -30,7 +30,7 @@ sctag = "sctag.cli:main"
 packages = ["sctag"]
 
 [tool.setuptools.package-data]
-sctag = ["report_template.html"]
+sctag = ["report_template.html", "playlists_browser.js"]
 
 [tool.ruff]
 line-length = 120

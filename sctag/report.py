@@ -14,7 +14,7 @@ import numpy as np
 
 from .analyze import energy_summary, load_likes
 from .classify import MIN_POSITIVES, GenreModel, load_labels
-from .config import ANALYSIS, ENERGY_COOL, ENERGY_HOT, ENERGY_MAJORITY, KINDS, report_path
+from .config import ANALYSIS, ENERGY_COOL, ENERGY_HOT, ENERGY_MAJORITY, KINDS, library_path, report_path
 from .models import unit
 from .search import Index, best, load_arrays
 from .text_tags import GENRE_PATTERNS, text_tags
@@ -64,6 +64,7 @@ COVER_QUERIES = [
     "a dark minimal abstract cover",
 ]
 SET_GENRE_MIN_SHARE = 0.2  # a set gets a genre guess when this share of its windows has it
+LIBRARY_FIELDS = ("id", "title", "artist", "url", "text_genres", "guess_genres", "clap_moods", "bpm", "energy")
 
 
 def load(kind):
@@ -162,6 +163,8 @@ def write(kind, recs, ix, enc, gm, labels):
     }
     out = report_path(kind)
     out.write_text(TEMPLATE.read_text().replace("/*DATA*/null", json.dumps(payload, ensure_ascii=False)))
+    library = [{k: r.get(k) for k in LIBRARY_FIELDS} for r in recs]  # your labels are applied when it's read
+    library_path(kind).write_text(json.dumps(library, ensure_ascii=False))
     guessed = sum(bool(r["guess_genres"]) and not r["text_genres"] for r in recs)
     log.info("wrote %s: %d %s, %d untagged ones got a genre guess", out, len(recs), kind, guessed)
 

@@ -12,6 +12,18 @@ from .config import KINDS, LIKES
 
 log = logging.getLogger("sctag")
 
+PLAYLISTS_HELP = """\
+Private SoundCloud playlists from your tags, to listen by genre in the SoundCloud app.
+
+data/playlists.json lists every candidate playlist with "make": false: set the ones you want to true and check
+with  sctag playlists. Then  sctag playlists --browser  writes data/playlists_browser.js: paste it into the
+console of soundcloud.com (logged in) and it makes them. SoundCloud's bot protection blocks scripts, so this last
+step has to run in your browser. Paste a new script after labelling / `sctag report` to update the playlists.
+
+The script only creates private playlists titled "sctag · ..." and edits their track list: it never deletes
+anything and never touches likes, follows or other playlists.
+"""
+
 
 def wait_until(hhmm):
     start = datetime.datetime.combine(datetime.date.today(), datetime.time.fromisoformat(hhmm))
@@ -64,6 +76,12 @@ def cmd_serve(args):
     serve(args.port)
 
 
+def cmd_playlists(args):
+    from .playlists import playlists
+
+    playlists(args.browser)
+
+
 def cmd_models(args):
     from .models import download
 
@@ -97,6 +115,15 @@ def parser():
     c = sub.add_parser("serve", help="open the reports with live search and labelling")
     c.add_argument("--port", type=int, default=8765, help="default: 8765")
     c.set_defaults(func=cmd_serve)
+
+    c = sub.add_parser(
+        "playlists",
+        help="the SoundCloud playlists you picked: report, then --browser to make them",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=PLAYLISTS_HELP,
+    )
+    c.add_argument("--browser", action="store_true", help="write the script that makes them in your browser")
+    c.set_defaults(func=cmd_playlists)
 
     c = sub.add_parser("models", help="download the Essentia models")
     c.set_defaults(func=cmd_models)

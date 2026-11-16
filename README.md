@@ -9,9 +9,11 @@ that run on your own computer. Made for curating DJ sets out of a big pile of li
 - **Sets & podcasts** are handled separately: each one is labelled energetic / mixed / calm with a timeline, so
   you can pick one for the right moment of the day.
 - **Your own genres**: label a few tracks in the page and a small model learns your vocabulary and tags the rest.
+- **On your phone**: turn the genres you pick into private SoundCloud playlists, to listen in the SoundCloud app.
 
 Audio is streamed in short 30 s windows and never written to disk; only tags and embeddings are kept.
-It only reads public data: no login, and it never likes, unlikes, follows or posts anything.
+It only reads public data: no login, and it never likes, unlikes, follows or posts anything. The one exception is
+the playlist script you paste into your browser yourself: it creates private playlists (see [Playlists](#playlists)).
 
 ## Setup
 
@@ -64,7 +66,35 @@ All commands (`sctag <command> --help` for details):
 | `sctag analyze tracks\|sets` | analyze the audio; `--sample 20` to try it on a few likes first |
 | `sctag report` | train the genre model and build the HTML reports |
 | `sctag serve` | open the reports with live search and labelling |
+| `sctag playlists` | report of the SoundCloud playlists you could make; `--browser` writes the script that makes them |
 | `sctag models` | download the Essentia models |
+
+## Playlists
+
+To listen by genre on your phone, `sctag playlists` can turn your tags into private SoundCloud playlists. Nothing
+is made until you pick it:
+
+1. `sctag playlists` prints every candidate (each genre, mood and set energy with at least 5 likes) with its size,
+   and lists them in `data/playlists.json`, all with `"make": false`. It doesn't contact your account.
+2. In `data/playlists.json`, set `"make": true` on the ones you want. You can rename them, add
+   `"guesses": false` to leave out genres guessed from audio, or add your own playlist combining filters:
+   `{"make": true, "title": "dark fast funk", "kind": "tracks", "genre": "baile funk", "mood": "dark", "bpm": [130, 200]}`.
+3. Rerun `sctag playlists` to check the picks, then `sctag playlists --browser`. It writes
+   `data/playlists_browser.js` and prints how to run it: open soundcloud.com, logged in, open the developer
+   console (Cmd+Option+I > Console), paste the script (`pbcopy < data/playlists_browser.js`) and press Enter.
+   Firefox first asks you to type `allow pasting`. The script lists the changes and asks before making them.
+   To update the playlists after labelling or a new `sctag report`, make and paste a new script.
+
+Why the browser: SoundCloud's bot protection (DataDome) blocks scripts from creating playlists, so this step runs
+in your own logged-in browser, with pauses of 10 to 25 s between changes. If SoundCloud shows you a check, solving
+it yourself is fine; sctag never tries to get around it, and stops at the first refusal.
+
+The script only creates private playlists titled "sctag · ..." and changes the track list of those playlists. It
+never deletes anything, never changes a playlist's title or sharing, and never touches likes, follows or your other
+playlists: its one write function refuses anything else. It remembers the playlists it made in your browser,
+so a new script updates them instead of making duplicates. Playlists longer than 500 likes are split into
+"(1)", "(2)", and so on. A playlist you stop picking is left as it is: delete it in the app if you don't want it.
+This uses SoundCloud's website API, which isn't officially documented for this.
 
 ## How it works
 
@@ -115,7 +145,9 @@ sctag/
   report.py             builds the HTML reports
   report_template.html  the report page
   serve.py              local server: live search, labelling, retrain
-tests/                  pytest, no models or network needed
+  playlists.py          your picked tags -> private SoundCloud playlists
+  playlists_browser.js  the script that makes them in your browser (the only part that writes)
+tests/                  pytest, no models or network needed (the browser script tests need Node.js)
 data/                   everything about your likes (not in git)
 models/                 Essentia models (not in git)
 ```
