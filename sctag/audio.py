@@ -31,9 +31,15 @@ def stream_url(track_url):
 
 def decode(url, start):
     """WIN_S seconds of mono float32 audio at SR, starting at `start` seconds."""
-    cmd = [FFMPEG, "-loglevel", "error", "-ss", str(start), "-t", str(WIN_S), "-i", url,
-           "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"]  # fmt: skip
-    return np.frombuffer(subprocess.run(cmd, capture_output=True, check=True, timeout=120).stdout, dtype=np.float32)
+    tail = ["-t", str(WIN_S), "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"]
+    # Fast input seek first; some ffmpeg builds return nothing when input-seeking into HLS streams,
+    # so fall back to output seek (decodes from the start, slower but reliable).
+    for cmd in ([FFMPEG, "-loglevel", "error", "-ss", str(start), "-i", url, *tail],
+                [FFMPEG, "-loglevel", "error", "-i", url, "-ss", str(start), *tail]):  # fmt: skip
+        out = subprocess.run(cmd, capture_output=True, check=True, timeout=300).stdout
+        if len(out) >= 4 * SR * 5:
+            break
+    return np.frombuffer(out, dtype=np.float32)
 
 
 def fetch_cover(artwork_url):
