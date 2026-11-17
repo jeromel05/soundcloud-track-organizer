@@ -66,6 +66,7 @@ def load_library():
     """{kind: [tagged like]} for everything still liked, newest like first.
 
     Likes that couldn't be analyzed (DRM-protected) are included with their title / tags genres only.
+    Your own posts and reposts (in likes.json too) are left out unless you also liked them.
     """
     analyzed = {}
     for kind in KINDS:
@@ -75,6 +76,8 @@ def load_library():
     labels, overrides = load_labels(), load_overrides()
     library = {kind: [] for kind in KINDS}
     for t in load_likes():
+        if t.get("liked") is False:  # a post or repost of yours that you didn't like
+            continue
         if t["id"] in analyzed:
             kind, r = analyzed[t["id"]]
         else:

@@ -3,6 +3,7 @@
 Everything lives under one folder: $SCTAG_HOME if set, else the current directory (run `sctag` from the repo).
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -16,6 +17,18 @@ KIND_OVERRIDES = DATA / "kind_overrides.json"  # {"<track id>": "sets"} moves a 
 CLIENT_ID = DATA / "client_id.txt"  # cached public SoundCloud web client id
 PLAYLISTS = DATA / "playlists.json"  # which SoundCloud playlists `sctag playlists` makes: you pick them
 PLAYLISTS_SCRIPT = DATA / "playlists_browser.js"  # makes them: paste it in the console of soundcloud.com
+# Your settings, editable by hand: {"username": "...", "liked_since": "YYYY-MM-DD"}. `sctag run` / `fetch` save the
+# username (the Refresh button uses it) and --since; likes and reposts older than liked_since are skipped.
+SETTINGS = DATA / "settings.json"
+
+
+def settings():
+    return json.loads(SETTINGS.read_text()) if SETTINGS.exists() else {}
+
+
+def save_settings(**changes):
+    DATA.mkdir(exist_ok=True)
+    SETTINGS.write_text(json.dumps({**settings(), **changes}, indent=1, ensure_ascii=False))
 
 
 def report_path(kind):

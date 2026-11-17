@@ -53,6 +53,17 @@ def kind_of(track, overrides):
     return overrides.get(str(track["id"])) or ("sets" if track["duration_s"] >= SET_MIN_S else "tracks")
 
 
+def waiting(kind):
+    """Likes of this kind that have no analysis yet, with `pending`: "failed" (an earlier attempt failed,
+    e.g. DRM) or "queued". The page shows them as playable cards without tags."""
+    overrides, out = load_overrides(), ANALYSIS / kind
+    return [
+        {**t, "pending": "failed" if (out / f"{t['id']}.error").exists() else "queued"}
+        for t in load_likes()
+        if kind_of(t, overrides) == kind and not (out / f"{t['id']}.json").exists()
+    ]
+
+
 def window_starts(duration, kind):
     """Start times (s) of the analyzed windows."""
     if duration <= WIN_S + 10:
@@ -157,9 +168,11 @@ def audio_models():
     return AudioModels()
 
 
-def _analyze_all(kind, todo, workers):
+def _analyze_all(kind, todo, workers, load_models=None, progress=None):
     """Analyze `todo` likes; returns [(track, error message)] for the failures."""
-    out, m, failed, t0 = ANALYSIS / kind, audio_models(), [], time.time()
+    if progress:
+        progress(kind, 0, len(todo))
+    out, m, failed, t0 = ANALYSIS / kind, (load_models or audio_models)(), [], time.time()
     with ThreadPoolExecutor(workers) as pool:
         for n, (t, fut) in enumerate(prefetch(pool, lambda t: fetch(t, kind), todo, ahead=workers * 2), 1):
             try:
@@ -178,11 +191,18 @@ def _analyze_all(kind, todo, workers):
                 failed.append((t, repr(e)))
                 status = f"FAILED {e!r}"[:80]
             log.info("[%d/%d %.1fs each] %-40.40s %s", n, len(todo), (time.time() - t0) / n, t["title"], status)
+            if progress:
+                progress(kind, n, len(todo))
     return failed
 
 
-def analyze(kind, sample=None, workers=4):
-    """Analyze all likes of one kind that aren't analyzed yet; failures are retried once (except DRM)."""
+def analyze(kind, sample=None, workers=4, load_models=None, progress=None):
+    """Analyze all likes of one kind that aren't analyzed yet; failures are retried once (except DRM).
+
+    Returns the failures as [(track, error message)]. `load_models()` returns AudioModels to reuse (only
+    called when there is something to analyze);
+    `progress(kind, n, total)` is called after each like.
+    """
     overrides = load_overrides()
     likes = [t for t in load_likes() if kind_of(t, overrides) == kind]
     if sample:
@@ -192,10 +212,11 @@ def analyze(kind, sample=None, workers=4):
     todo = [t for t in likes if not (out / f"{t['id']}.json").exists()]
     log.info("%s: %d already analyzed, %d to go", kind, len(likes) - len(todo), len(todo))
     if not todo:
-        return
-    failed = _analyze_all(kind, todo, workers)
+        return []
+    failed = _analyze_all(kind, todo, workers, load_models, progress)
     if retry := [t for t, err in failed if "DRM" not in err]:  # DRM-protected tracks can never be streamed
         log.info("retrying %d failures", len(retry))
-        failed = [f for f in failed if "DRM" in f[1]] + _analyze_all(kind, retry, workers)
+        failed = [f for f in failed if "DRM" in f[1]] + _analyze_all(kind, retry, workers, load_models, progress)
     n_drm = sum("DRM" in err for _, err in failed)
     log.info("%s: %d analyzed, %d failed (%d DRM-protected)", kind, len(todo) - len(failed), len(failed), n_drm)
+    return failed

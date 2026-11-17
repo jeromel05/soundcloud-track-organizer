@@ -53,3 +53,19 @@ def test_picks_file_keeps_your_choices(tmp_path, monkeypatch):
     entries, n_new = pl.load_picks(library)
     assert n_new == 0 and [e["title"] for e in entries if e["make"]] == ["my funk", "custom"]
     assert len(json.loads((tmp_path / "playlists.json").read_text())) == 3
+
+
+def test_library_is_likes_only(tmp_path, monkeypatch):
+    likes = [
+        {"id": 1, "title": "baile funk 1", "duration_s": 200},
+        {"id": 2, "title": "baile funk 2", "duration_s": 200, "liked": False, "reposted": True},
+        {"id": 3, "title": "baile funk 3", "duration_s": 200, "reposted": True},  # liked and reposted
+    ]
+    (tmp_path / "likes.json").write_text(json.dumps(likes))
+    for kind in ("tracks", "sets"):
+        (tmp_path / f"library_{kind}.json").write_text("[]")
+    monkeypatch.setattr(pl, "library_path", lambda kind: tmp_path / f"library_{kind}.json")
+    monkeypatch.setattr(pl, "load_likes", lambda: likes)
+    monkeypatch.setattr(pl, "load_labels", dict)
+    monkeypatch.setattr(pl, "load_overrides", dict)
+    assert [like["id"] for like in pl.load_library()["tracks"]] == [1, 3]

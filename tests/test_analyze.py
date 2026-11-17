@@ -33,3 +33,25 @@ def test_energy_arc_of_mixed_sets():
     hot, cool = ENERGY_HOT + 0.1, ENERGY_COOL - 0.1
     assert energy_summary([cool] * 3 + [hot] * 3)["energy_arc"] == "builds up"
     assert energy_summary([hot] * 3 + [cool] * 3)["energy_arc"] == "winds down"
+
+
+def test_waiting_lists_unanalyzed_likes_of_one_kind(tmp_path, monkeypatch):
+    import json
+
+    from sctag import analyze
+
+    likes = [
+        {"id": 1, "duration_s": 200},  # analyzed track
+        {"id": 2, "duration_s": 200},  # new track
+        {"id": 3, "duration_s": 200},  # failed before (DRM)
+        {"id": 4, "duration_s": 3600},  # new set
+    ]
+    (tmp_path / "likes.json").write_text(json.dumps(likes))
+    (tmp_path / "tracks").mkdir()
+    (tmp_path / "tracks" / "1.json").write_text("{}")
+    (tmp_path / "tracks" / "3.error").write_text("DRM")
+    monkeypatch.setattr(analyze, "LIKES", tmp_path / "likes.json")
+    monkeypatch.setattr(analyze, "ANALYSIS", tmp_path)
+    monkeypatch.setattr(analyze, "KIND_OVERRIDES", tmp_path / "none.json")
+    assert [(t["id"], t["pending"]) for t in analyze.waiting("tracks")] == [(2, "queued"), (3, "failed")]
+    assert [t["id"] for t in analyze.waiting("sets")] == [4]

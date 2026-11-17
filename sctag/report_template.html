@@ -17,6 +17,7 @@
     --mood: #2d2840; --genre: #22362a; --disc: #3a2f20; --mine: #5cc27d; --mid: #4a4844; --cool: #6d9be6; }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--ink);
   font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
 header { padding: 24px 16px 8px; max-width: 1400px; margin: auto; }
@@ -49,6 +50,11 @@ input[type=search] { width: min(420px, 100%); }
 .tag { font-size: 11px; padding: 1px 7px; border-radius: 4px; background: var(--chip); }
 .tag.m { background: var(--mood); } .tag.g { background: var(--genre); } .tag.d { background: var(--disc); }
 .tag.g.txt { font-weight: 600; } .tag.g.guess { background: none; box-shadow: inset 0 0 0 1px var(--genre); }
+.tag.yours { background: var(--accent); color: #fff; font-weight: 600; }
+.card.wait img { opacity: .75; }
+.pend { color: var(--muted); font-style: italic; }
+.tag.repost { box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
+.btn:disabled { opacity: .6; cursor: default; }
 .tag.g.mine { font-weight: 600; box-shadow: inset 0 0 0 1px var(--mine); }
 .bpm { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); }
 section h2 { font-size: 15px; margin: 22px 0 8px; }
@@ -90,6 +96,7 @@ a { color: var(--accent); }
     <button data-v="vibe">Vibe search</button>
     <button data-v="cover">Cover search</button>
     <button data-v="todo" hidden>To label</button>
+    <button id="refresh" class="btn" hidden title="fetch your new likes, posts and reposts from SoundCloud, analyze them, rebuild">⟳ Refresh likes</button>
     <button id="retrain" class="btn primary" hidden></button>
     <a id="other" class="kindlink"></a>
   </nav>
@@ -102,6 +109,7 @@ a { color: var(--accent); }
       <div class="row"><span class="lbl">Mood</span><span id="fm" class="row"></span></div>
       <div class="row"><span class="lbl">Genre</span><span id="fg" class="row"></span></div>
       <div class="row" id="erow" hidden><span class="lbl">Energy</span><span id="fe" class="row"></span></div>
+      <div class="row" id="srow"><span class="lbl">Source</span><span id="fs" class="row"></span></div>
       <div class="row"><span class="lbl">BPM</span>
         <input type="range" id="bmin" min="40" max="200" value="40"><input type="range" id="bmax" min="40" max="200" value="200">
         <span class="bpm" id="bl"></span></div>
@@ -131,6 +139,7 @@ a { color: var(--accent); }
 <script>
 const D = /*DATA*/null;
 const T = D.tracks;
+for (const t of D.pending || []) { t.idx = T.length; T.push(t); }  // liked, not analyzed yet: playable, no tags
 const SETS = D.kind === "sets";
 const LIVE = location.protocol.startsWith("http");  // served by `sctag serve`: search + labelling
 const byId = new Map(T.map(t => [t.id, t]));
@@ -156,15 +165,45 @@ document.title = SETS ? "Sets · SoundCloud likes" : "Tracks · SoundCloud likes
 $("#h1").textContent = SETS ? "Sets, mixes & podcasts" : "Tracks";
 $("#other").textContent = SETS ? "→ Tracks" : "→ Sets & podcasts";
 $("#other").href = SETS ? "report_tracks.html" : "report_sets.html";
-$("#sub").textContent = `${T.length} ${SETS ? "sets" : "tracks"} · click a cover for details and playback` +
-  (LIVE ? "" : " · run sctag serve for live search and labelling");
+const subExtra = [];  // "likes fetched …", "since …"
+function setSub() {
+  const w = T.filter(t => t.pending).length;
+  $("#sub").textContent = [`${T.length - w} ${SETS ? "sets" : "tracks"}`, ...(w ? [`${w} waiting for analysis`] : []),
+    "click a cover for details and playback", ...(LIVE ? [] : ["run sctag serve for live search and labelling"]),
+    ...subExtra].join(" · ");
+}
+setSub();
 
 function genreTags(t) {
   if (t.my_genres) return t.my_genres.map(g => `<span class="tag g mine" title="your label">${esc(g)}</span>`);
   return [...t.text_genres.map(([g, src]) => `<span class="tag g txt" title="from ${src}">${esc(g)}</span>`),
     ...t.guess_genres.map(([g]) => `<span class="tag g guess" title="guessed from audio by your genre model">${esc(g)}?</span>`)];
 }
+const sourceTags = t => (t.posted ? ' <span class="tag yours" title="you posted this">posted</span>' : "") +
+  (t.reposted ? ' <span class="tag repost" title="you reposted this">repost</span>' : "");
+// Dates. "Added" = when a track entered your library: your like, your repost, or the publish date of your own post.
+// Only the sources picked in the Source chips count, so with "reposts" on, a track sorts by when you reposted it.
+const day = d => (d || "").slice(0, 10);
+const SOURCE_OF = { liked: "likes", reposted: "reposts", posted: "posts" };
+const events = t => [["liked", t.liked !== false && t.liked_at], ["reposted", t.reposted && t.reposted_at],
+  ["posted", t.posted && t.uploaded_at]].filter(e => e[1]);
+function added(t) {
+  const ev = events(t), picked = ev.filter(([k]) => !sel.s.size || sel.s.has(SOURCE_OF[k])), list = picked.length ? picked : ev;
+  return list.length ? list.reduce((a, b) => (b[1] > a[1] ? b : a)) : ["added", t.liked_at || ""];
+}
+const released = t => t.release_date || t.uploaded_at || "";  // the artist's release date if set, else when it was published
+const allDates = t => [...events(t).map(([k, d]) => `${k} ${day(d)}`), ...(released(t) ? [`released ${day(released(t))}`] : [])];
+const datesLine = t => allDates(t).map(x => x[0].toUpperCase() + x.slice(1)).join(" · ");
+const releaseSort = () => $("#sort").value.includes("releases");
+const dateText = t => `<span title="${esc(allDates(t).join(" · "))}">${
+  releaseSort() ? `released ${day(released(t))}` : added(t).map((x, i) => i ? day(x) : x).join(" ")}</span>`;
+let busy = false;  // a refresh is running
+// during a refresh every waiting track gets (re)tried; "failed" = the last attempt failed (DRM, geo-blocked, network…)
+const pendText = t => busy ? "◌ analyzing…" : t.pending === "failed" ? "couldn’t be analyzed" : "◌ not analyzed yet";
 function card(t) {
+  if (t.pending) return `<div class="card wait" data-i="${t.idx}"><img loading="lazy" src="${esc(art(t))}" alt="">
+    <div class="b"><div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}${sourceTags(t)}</div>
+    <div class="bpm">${SETS ? length(t) + " · " : ""}${dateText(t)}</div><div class="bpm pend">${pendText(t)}</div></div></div>`;
   const discogs = SETS ? t.genre_mix.slice(0, 1).map(([g]) => g) : [t.discogs_genres[0][0]];
   const tags = [
     ...t.clap_moods.map(([m]) => `<span class="tag m">${esc(m)}</span>`),
@@ -172,46 +211,70 @@ function card(t) {
     ...discogs.map(g => `<span class="tag d" title="Discogs style (Essentia)">${esc(short(g))}</span>`),
   ].join("");
   return `<div class="card" data-i="${t.idx}"><img loading="lazy" src="${esc(art(t))}" alt="">
-    <div class="b"><div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}</div>
-    <div class="bpm">${SETS ? length(t) + " · " : ""}${bpmText(t)} · liked ${t.liked_at.slice(0, 10)}</div>
+    <div class="b"><div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}${sourceTags(t)}</div>
+    <div class="bpm">${SETS ? length(t) + " · " : ""}${bpmText(t)} · ${dateText(t)}</div>
     ${strip(t)}<div class="tags">${tags}</div></div></div>`;
 }
 
 // ---- library: search, sort, filters
+const last = f => (a, b) => (!!a.pending - !!b.pending) || f(a, b);  // tracks without analysis go last
+const dated = (f, dir) => (a, b) => { const x = f(a), y = f(b); return (!x - !y) || dir * x.localeCompare(y); };  // undated last
 const SORTS = {
-  "liked, newest": () => 0,
-  "liked, oldest": (a, b) => a.liked_at.localeCompare(b.liked_at),
-  "BPM, slow → fast": (a, b) => a.bpm - b.bpm,
-  "BPM, fast → slow": (a, b) => b.bpm - a.bpm,
-  ...(SETS ? { "calmest first": (a, b) => a.energy_score - b.energy_score,
-    "most energetic first": (a, b) => b.energy_score - a.energy_score,
-    "shortest first": (a, b) => a.duration_s - b.duration_s } : {}),
+  "Recently added": dated(t => added(t)[1], -1),
+  "Oldest added": dated(t => added(t)[1], 1),
+  "Newest releases": dated(released, -1),
+  "Oldest releases": dated(released, 1),
+  "BPM, slow → fast": last((a, b) => a.bpm - b.bpm),
+  "BPM, fast → slow": last((a, b) => b.bpm - a.bpm),
+  ...(SETS ? { "Calmest first": last((a, b) => a.energy_score - b.energy_score),
+    "Most energetic first": last((a, b) => b.energy_score - a.energy_score),
+    "Shortest first": (a, b) => a.duration_s - b.duration_s } : {}),
 };
 $("#sort").innerHTML = Object.keys(SORTS).map(k => `<option>${k}</option>`).join("");
-const sel = { m: new Set(), g: new Set(), e: new Set() };
-const counted = (names, f, key) => { const c = {}; T.forEach(t => f(t).forEach(n => c[n] = (c[n] || 0) + 1));
+const sel = { m: new Set(), g: new Set(), e: new Set(), s: new Set() };
+// remember the sort and the Source chips per page: the page reloads itself when new tags are ready
+const PREFS = `sctag-prefs-${D.kind}`;
+try {
+  const p = JSON.parse(localStorage.getItem(PREFS) || "{}");
+  if (p.sort in SORTS) $("#sort").value = p.sort;
+  (p.sources || []).forEach(n => ["likes", "posts", "reposts"].includes(n) && sel.s.add(n));
+} catch {}
+function savePrefs() {
+  try { localStorage.setItem(PREFS, JSON.stringify({ sort: $("#sort").value, sources: [...sel.s] })); } catch {}
+}
+const counted = (names, f, key) => { const c = {}; T.forEach(t => t.pending || f(t).forEach(n => c[n] = (c[n] || 0) + 1));
   return names.filter(n => c[n] || sel[key].has(n)).map(n => [n, c[n] || 0]); };
 function chips(el, entries, key) {
   el.innerHTML = entries.map(([n, c]) => `<button class="chip${sel[key].has(n) ? " on" : ""}" data-n="${esc(n)}">${esc(n)}<i>${c}</i></button>`).join("");
 }
+// where a track comes from: your likes, your posts, your reposts (a track can be several)
+const SOURCES = { likes: t => t.liked !== false, posts: t => !!t.posted, reposts: t => !!t.reposted };
+const sourcesOf = t => Object.keys(SOURCES).filter(n => SOURCES[n](t));
 function renderChips() {
+  chips($("#fs"), Object.entries(SOURCES).map(([n, f]) => [n, T.filter(f).length]), "s");  // always all three
   chips($("#fm"), counted(D.moods, t => t.clap_moods.map(x => x[0]), "m"), "m");
   chips($("#fg"), counted(D.genres, genresOf, "g").sort((a, b) => b[1] - a[1]), "g");
   if (SETS) chips($("#fe"), counted(["energetic", "mixed", "calm"], t => [energyOf(t)], "e"), "e");
 }
-for (const [id, key] of [["#fm", "m"], ["#fg", "g"], ["#fe", "e"]]) $(id).onclick = e => {
+for (const [id, key] of [["#fm", "m"], ["#fg", "g"], ["#fe", "e"], ["#fs", "s"]]) $(id).onclick = e => {
   const n = e.target.closest(".chip")?.dataset.n; if (n == null) return;
   sel[key].has(n) ? sel[key].delete(n) : sel[key].add(n);
+  if (key === "s") savePrefs();
   renderChips(); render();
 };
 $("#erow").hidden = !SETS;
+if (!T.some(t => t.posted || t.reposted)) $("#srow").title = "press Refresh likes to fetch your posts and reposts";
 const norm = s => (s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
-T.forEach(t => t._text = norm([t.title, t.artist, t.sc_genre, t.sc_tags].join(" ")));
+const textOf = t => norm([t.title, t.artist, t.sc_genre, t.sc_tags].join(" "));
+T.forEach(t => t._text = textOf(t));
 function render() {
   const lo = +$("#bmin").value, hi = +$("#bmax").value, words = norm($("#q").value).split(/\s+/).filter(Boolean);
   $("#bl").textContent = `${lo}–${hi}`;
-  const ok = t => words.every(w => t._text.includes(w))
-    && [...sel.m].every(m => t.clap_moods.some(x => x[0] === m))
+  // tracks still waiting for analysis have no moods, genres, energy or BPM: hidden as soon as one of those is used
+  const tagged = sel.m.size || sel.g.size || sel.e.size || lo > +$("#bmin").min || hi < +$("#bmax").max;
+  const ok = t => words.every(w => t._text.includes(w)) && (sel.s.size === 0 || sourcesOf(t).some(n => sel.s.has(n)))
+    && (t.pending ? !tagged : analyzedOk(t));
+  const analyzedOk = t => [...sel.m].every(m => t.clap_moods.some(x => x[0] === m))
     && (sel.g.size === 0 || genresOf(t).some(g => sel.g.has(g)))
     && (!SETS || sel.e.size === 0 || sel.e.has(energyOf(t)))
     && (SETS ? t.bpm_range[1] >= lo && t.bpm_range[0] <= hi : t.bpm >= lo && t.bpm <= hi);
@@ -219,7 +282,8 @@ function render() {
   $("#count").textContent = list.length === T.length ? "" : `${list.length} match`;
   $("#grid").innerHTML = list.map(card).join("") || '<p class="sub">Nothing matches.</p>';
 }
-$("#bmin").oninput = $("#bmax").oninput = $("#q").oninput = $("#sort").onchange = render;
+$("#bmin").oninput = $("#bmax").oninput = $("#q").oninput = render;
+$("#sort").onchange = () => { savePrefs(); render(); };
 
 // ---- vibe / cover search: examples baked in at build time, plus a live box when served
 const strip6 = list => `<div class="strip">${list.map(card).join("")}</div>`;
@@ -296,6 +360,67 @@ $("#retrain").onclick = async () => {
   if (r.ok) location.reload(); else { b.disabled = false; b.textContent = "Retrain failed (see console)"; console.log(r.log); }
 };
 
+// ---- refresh (served only): fetch new likes and your uploads, analyze the new ones, rebuild
+const STEPS = { fetch: "Fetching likes, posts and reposts…", rebuild: "Rebuilding reports…" };
+const ago = s => { const d = (Date.now() / 1000 - s) / 86400;
+  return d < 1 ? "today" : d < 2 ? "yesterday" : `${Math.floor(d)} days ago`; };
+let seenRebuilds = null, tagsReady = false, merged = false;  // rebuilds of this page's report already shown
+function showJob(j) {
+  const b = $("#refresh"), was = busy;
+  busy = j.state === "running";
+  $("#retrain").disabled = busy;
+  b.disabled = busy && !tagsReady;
+  if (tagsReady) b.textContent = "✓ New tags ready — reload";
+  else if (busy) b.textContent = "⟳ " + (STEPS[j.step] || `Analyzing ${j.step}${j.total ? ` ${j.done} / ${j.total}` : "…"}`);
+  else b.textContent = j.state === "failed" ? "⟳ Refresh failed — see terminal" : "⟳ Refresh likes";
+  if (busy !== was) render();  // "analyzing…" vs "not analyzed yet"
+}
+async function mergeWaiting() {  // new likes show up right after the fetch, untagged but playable
+  const list = await (await fetch(`/api/pending?kind=${D.kind}`)).json();
+  const added = list.filter(t => !byId.has(t.id));
+  for (const t of added) { t.idx = T.length; t._text = textOf(t); T.push(t); byId.set(t.id, t); }
+  if (added.length) { setSub(); renderChips(); render(); }
+}
+const noteFor = j => j.new ? `refreshed just now: ${j.new} new${j.failed ? `, ${j.failed} couldn’t be analyzed` : ""}`
+  : "refreshed just now: up to date";
+function reloadWithNote(j) {
+  try { sessionStorage.setItem("sctag-note", noteFor(j)); } catch {}
+  location.reload();
+}
+async function poll() {
+  const j = await (await fetch("/api/refresh")).json();
+  const rebuilds = (j.rebuilds || {})[D.kind] || 0;
+  seenRebuilds ??= rebuilds;
+  if (j.state === "running" && j.fetched && !merged) { merged = true; await mergeWaiting(); }
+  if (rebuilds > seenRebuilds) {
+    // the report has tags for more likes: offer them, and reload by itself only at the end when nothing plays
+    seenRebuilds = rebuilds;
+    tagsReady = true;
+    $("#refresh").dataset.note = noteFor(j);
+  }
+  if (tagsReady && j.state !== "running" && !$("#player").getAttribute("src")) return reloadWithNote(j);
+  showJob(j);
+  if (j.state === "running") return setTimeout(poll, 2000);
+  if (j.state === "failed") console.log(j.error);
+}
+$("#refresh").onclick = async () => {
+  if (tagsReady) {
+    try { sessionStorage.setItem("sctag-note", $("#refresh").dataset.note); } catch {}
+    return location.reload();
+  }
+  let { username } = await (await fetch("/api/refresh")).json();
+  if (!username) {
+    username = (prompt("Your SoundCloud username (the part after soundcloud.com/)") || "").trim();
+    if (!username) return;
+  }
+  seenRebuilds = 0;  // a new job: all its rebuilds count
+  merged = false;
+  const r = await fetch("/api/refresh", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username }) });
+  if (!r.ok && r.status !== 409) { $("#refresh").textContent = "⟳ Refresh failed — see terminal"; return; }
+  poll();
+};
+
 // ---- details drawer
 const bar = p => `<span class="bar"><i style="width:${Math.round(p * 100)}%"></i></span>`;
 function open(i, play = true) {
@@ -304,10 +429,18 @@ function open(i, play = true) {
   const bin = ["danceable", "aggressive", "party", "happy", "sad", "relaxed", "bright", "instrumental", "tonal"];
   const keepScroll = d.dataset.i == i ? d.scrollTop : 0;
   d.dataset.i = i;
-  d.innerHTML = `<button class="close" onclick="$('#drawer').classList.remove('open')">×</button>
+  d.innerHTML = t.pending ? `<button class="close" onclick="$('#drawer').classList.remove('open')">×</button>
     <img class="big" src="${esc((t.artwork_url || "").replace("-large.", "-t500x500."))}" alt="">
     <h2 style="margin:10px 0 0">${esc(t.title)}</h2>
-    <div class="a">${esc(t.artist)} · <a href="${esc(t.url)}" target="_blank">open on SoundCloud</a></div>
+    <div class="a">${esc(t.artist)}${sourceTags(t)} · <a href="${esc(t.url)}" target="_blank">open on SoundCloud</a></div>
+    <div class="bpm">${esc(datesLine(t))}</div>
+    <p class="bpm">${length(t)} · SoundCloud genre: <b>${esc(t.sc_genre || "—")}</b></p>
+    <p class="pend">${t.pending === "failed" && !busy ? "The last attempt to analyze this track failed (often DRM or geo-blocking), so it has no tags yet."
+      : "Tags appear once this track is analyzed."}</p>` : `<button class="close" onclick="$('#drawer').classList.remove('open')">×</button>
+    <img class="big" src="${esc((t.artwork_url || "").replace("-large.", "-t500x500."))}" alt="">
+    <h2 style="margin:10px 0 0">${esc(t.title)}</h2>
+    <div class="a">${esc(t.artist)}${sourceTags(t)} · <a href="${esc(t.url)}" target="_blank">open on SoundCloud</a></div>
+    <div class="bpm">${esc(datesLine(t))}</div>
     <p class="bpm">${length(t)} ·
       ${SETS ? `${energyText(t)}: ${Math.round(t.energetic_share * 100)}% energetic, ${Math.round(t.calm_share * 100)}% calm ·
         BPM ${t.bpm_range[0]}–${t.bpm_range[1]} (median ${Math.round(t.bpm)})` : `BPM ${t.bpm} (windows: ${t.bpm_windows.join(", ")})`} ·
@@ -347,8 +480,15 @@ document.querySelector("nav").onclick = e => {
 
 (async () => {
   if (LIVE) {
-    document.querySelector('nav [data-v="todo"]').hidden = $("#retrain").hidden = false;
+    document.querySelector('nav [data-v="todo"]').hidden = $("#retrain").hidden = $("#refresh").hidden = false;
     applyLabels(await (await fetch("/api/labels")).json());
+    let note = null;
+    try { note = sessionStorage.getItem("sctag-note"); sessionStorage.removeItem("sctag-note"); } catch {}
+    const j = await (await fetch("/api/refresh")).json();
+    if (note || j.fetched_at) subExtra.push(note || `likes fetched ${ago(j.fetched_at)}`);
+    if (j.liked_since) subExtra.push(`since ${j.liked_since}`);
+    setSub();
+    poll();
   }
   renderChips(); render();
 })();
